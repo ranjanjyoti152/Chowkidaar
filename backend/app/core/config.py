@@ -39,17 +39,20 @@ class Settings(BaseSettings):
     max_concurrent_streams: int = 10
     
     # Storage
-    events_storage_path: str = "./storage/events"
-    frames_storage_path: str = "./storage/frames"
+    base_path: str = "/home/proxpc/NVR/backend"
+    events_storage_path: str = "/home/proxpc/NVR/backend/storage/events"
+    frames_storage_path: str = "/home/proxpc/NVR/backend/storage/frames"
     
     # CORS
-    cors_origins: str = "http://localhost:3000,http://localhost:5173"
+    cors_origins: str = "*"
     
     # Redis
     redis_url: Optional[str] = None
     
     @property
     def cors_origins_list(self) -> List[str]:
+        if self.cors_origins.strip() == "*":
+            return ["*"]
         return [origin.strip() for origin in self.cors_origins.split(",")]
     
     @property

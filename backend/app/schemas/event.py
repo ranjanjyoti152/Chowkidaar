@@ -3,7 +3,7 @@ Chowkidaar NVR - Event Schemas
 """
 from datetime import datetime
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from app.models.event import EventType, EventSeverity
 
 
@@ -15,12 +15,26 @@ class DetectedObject(BaseModel):
 
 class EventBase(BaseModel):
     event_type: EventType
-    severity: EventSeverity = EventSeverity.LOW
+    severity: EventSeverity = EventSeverity.low
     camera_id: int
+    
+    @field_validator('event_type', mode='before')
+    @classmethod
+    def normalize_event_type(cls, v):
+        if isinstance(v, str):
+            return v.lower()
+        return v
+    
+    @field_validator('severity', mode='before')
+    @classmethod
+    def normalize_severity(cls, v):
+        if isinstance(v, str):
+            return v.lower()
+        return v
 
 
 class EventCreate(EventBase):
-    detected_objects: Dict[str, Any] = {}
+    detected_objects: List[Dict[str, Any]] = []
     confidence_score: float = 0.0
     detection_metadata: Dict[str, Any] = {}
     frame_path: Optional[str] = None
@@ -34,7 +48,7 @@ class EventUpdate(BaseModel):
 
 class EventResponse(EventBase):
     id: int
-    detected_objects: Dict[str, Any]
+    detected_objects: List[Dict[str, Any]]
     confidence_score: float
     frame_path: Optional[str] = None
     thumbnail_path: Optional[str] = None

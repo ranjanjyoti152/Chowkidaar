@@ -97,6 +97,13 @@ logs/
 recordings/
 snapshots/
 
+# Storage - Event frames and thumbnails
+backend/storage/
+storage/
+*.jpg
+*.jpeg
+*.png
+
 # =============================================================================
 # Docker
 # =============================================================================

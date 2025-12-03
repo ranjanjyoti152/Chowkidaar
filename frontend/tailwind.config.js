@@ -64,9 +64,9 @@ export default {
         },
       },
       boxShadow: {
-        'glass': '0 8px 32px 0 rgba(6, 182, 212, 0.15)',
-        'glass-lg': '0 8px 32px 0 rgba(6, 182, 212, 0.25)',
-        'neon': '0 0 5px theme(colors.primary.400), 0 0 20px theme(colors.primary.600)',
+        'glass': '0 8px 32px 0 rgba(6, 182, 212, 0.2)',
+        'glass-lg': '0 8px 32px 0 rgba(6, 182, 212, 0.35)',
+        'neon': '0 0 5px theme(colors.primary.400), 0 0 20px theme(colors.primary.500)',
       },
     },
   },

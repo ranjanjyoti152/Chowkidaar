@@ -37,11 +37,26 @@
 ## 🚀 Features
 
 ### Core Features
-- **Real-time RTSP Stream Processing** - Connect multiple IP cameras
-- **AI Object Detection** - YOLOv8+ for detecting people, vehicles, fire, smoke, etc.
-- **Event Summarization** - VLM-powered intelligent scene description
-- **Multi-user Support** - Separate event storage per user session
-- **AI Assistant** - Query your surveillance events using natural language
+- **Real-time RTSP Stream Processing** - Connect unlimited IP cameras
+- **AI Object Detection** - YOLOv8+ with support for custom trained models
+- **Automatic Event Creation** - Background service auto-detects and saves events
+- **Event Summarization** - Vision LLM (Ollama) powered scene descriptions
+- **Multi-user Support** - Role-based access (Admin/Operator/Viewer)
+- **AI Assistant** - Query surveillance events using natural language
+- **Persistent Settings** - User preferences saved to database
+
+### Detection Features
+- 🎯 Custom YOLO model upload and management
+- 📊 Confidence threshold configuration
+- 🔍 Filter by object classes (person, car, fire, smoke, etc.)
+- ⏱️ Configurable detection cooldown
+- 🖼️ Frame snapshot with bounding boxes
+
+### AI Features
+- 🤖 Multiple Ollama model support (auto-fetch available models)
+- 💬 Vision-Language Model integration for scene analysis
+- 🧠 Chat assistant with conversation history
+- 📷 Image analysis with event context
 
 ### UI Features
 - 🌙 Dark theme with cyan/blue gradient accents
@@ -111,86 +126,89 @@ chowkidaar/
 ## 🚦 Getting Started
 
 ### Prerequisites
-- Python 3.10+
-- Node.js 18+
-- PostgreSQL 14+
-- Ollama installed locally
-- NVIDIA GPU (recommended for YOLO inference)
+- Docker & Docker Compose (recommended)
+- Python 3.10+ (for manual setup)
+- Node.js 18+ (for manual setup)
+- NVIDIA GPU with CUDA (recommended for YOLO inference)
+- Ollama server running (local or remote)
 
-### Option 1: Docker (Recommended)
+### Option 1: Docker Quick Start (Recommended)
 
 ```bash
 # Clone the repository
-cd /path/to/NVR
+git clone https://github.com/ranjanjyoti152/Chowkidaar.git
+cd Chowkidaar
 
-# Copy environment file
+# Copy environment file and configure
 cp .env.example .env
+nano .env  # Edit settings
 
-# Edit .env with your settings (change SECRET_KEY and passwords!)
-nano .env
-
-# Start all services (with GPU support)
+# Start all services
 docker compose up -d
 
-# Or for CPU-only mode:
-docker compose -f docker-compose.cpu.yml up -d
-
-# Pull the LLaVA model for Ollama
-docker exec -it chowkidaar-ollama ollama pull llava
-
-# Access the application
-# Frontend: http://localhost
-# Backend API: http://localhost:8000
-# API Docs: http://localhost:8000/docs
+# Database will auto-initialize from init.sql
+# Access the app at http://localhost
 ```
 
-### Option 2: Manual Setup
+### Option 2: Manual Development Setup
 
 #### 1. Setup PostgreSQL Database
 ```bash
-# Create database
-createdb chowkidaar
+# Start PostgreSQL container (easiest way)
+docker run -d \
+  --name chowkidaar-db \
+  -e POSTGRES_USER=chowkidaar \
+  -e POSTGRES_PASSWORD=chowkidaar123 \
+  -e POSTGRES_DB=chowkidaar \
+  -p 5533:5432 \
+  -v chowkidaar_postgres:/var/lib/postgresql/data \
+  postgres:16-alpine
 
-# Or using psql
-psql -U postgres
-CREATE DATABASE chowkidaar;
-CREATE USER chowkidaar WITH PASSWORD 'your_password';
-GRANT ALL PRIVILEGES ON DATABASE chowkidaar TO chowkidaar;
-\q
+# Initialize database schema
+docker exec -i chowkidaar-db psql -U chowkidaar -d chowkidaar < backend/database/init.sql
+
+# Or use existing PostgreSQL:
+psql -U postgres -c "CREATE DATABASE chowkidaar;"
+psql -U postgres -d chowkidaar < backend/database/init.sql
 ```
 
-#### 2. Setup Backend
+#### 2. Setup Ollama (Vision LLM)
+```bash
+# Install Ollama
+curl -fsSL https://ollama.com/install.sh | sh
+
+# Pull vision models (choose one or more)
+ollama pull llama3.2-vision:11b  # Best for security analysis
+ollama pull gemma3:4b             # Lightweight chat model
+
+# Start Ollama server
+ollama serve
+```
+
+#### 3. Setup Backend
 ```bash
 cd backend
 
 # Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+python3.12 -m venv venv
+source venv/bin/activate
 
 # Install dependencies
 pip install -r requirements.txt
 
-# Copy environment file
-cp .env.example .env
-# Edit .env with your database URL and settings
+# Create .env file
+cat > .env << EOF
+DATABASE_URL=postgresql+asyncpg://chowkidaar:chowkidaar123@localhost:5533/chowkidaar
+SECRET_KEY=your-super-secret-key-change-this
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_VLM_MODEL=llama3.2-vision:11b
+OLLAMA_CHAT_MODEL=gemma3:4b
+YOLO_MODEL_PATH=yolov8n.pt
+YOLO_DEVICE=0
+EOF
 
-# Run database migrations
-alembic upgrade head
-
-# Start the backend server
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-#### 3. Setup Ollama
-```bash
-# Install Ollama (if not installed)
-curl -fsSL https://ollama.com/install.sh | sh
-
-# Pull the LLaVA vision model
-ollama pull llava
-
-# Start Ollama server (usually runs automatically)
-ollama serve
+# Start backend server
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8001
 ```
 
 #### 4. Setup Frontend
@@ -200,18 +218,40 @@ cd frontend
 # Install dependencies
 npm install
 
+# Create .env file
+echo "VITE_API_BASE_URL=http://localhost:8001/api/v1" > .env
+
 # Start development server
 npm run dev
 ```
 
-#### 5. Create Admin User
+#### 5. Access Application
+- **Frontend**: http://localhost:5173
+- **Backend API**: http://localhost:8001
+- **API Docs**: http://localhost:8001/docs
+
+#### 6. Create First User
+Register through the UI or use API:
 ```bash
-# The first registered user automatically becomes admin
-# Or use the API to create one:
-curl -X POST http://localhost:8000/api/v1/auth/register \
+curl -X POST http://localhost:8001/api/v1/auth/register \
   -H "Content-Type: application/json" \
-  -d '{"username": "admin", "email": "admin@example.com", "password": "your_password"}'
+  -d '{
+    "username": "admin",
+    "email": "admin@example.com", 
+    "password": "admin123",
+    "full_name": "Admin User"
+  }'
 ```
+
+### Database Schema
+
+The `backend/database/init.sql` file contains the complete database schema:
+- **users** - User accounts with roles (admin/operator/viewer)
+- **cameras** - RTSP camera configurations
+- **events** - Detection events with metadata
+- **chat_sessions** - AI assistant chat history
+- **chat_messages** - Chat messages
+- **user_settings** - Per-user settings (detection, VLM, storage, notifications)
 
 ### Environment Variables
 
@@ -227,17 +267,58 @@ curl -X POST http://localhost:8000/api/v1/auth/register \
 
 ## 📡 API Endpoints
 
+### Authentication
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/v1/auth/register` | POST | Register new user |
+| `/api/v1/auth/login` | POST | Login, get JWT token |
+| `/api/v1/auth/me` | GET | Get current user |
+
+### Cameras
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/v1/cameras` | GET/POST | List/Add cameras |
-| `/api/v1/cameras/{id}` | GET/PUT/DELETE | Camera operations |
-| `/api/v1/cameras/{id}/stream` | GET | Get camera stream |
-| `/api/v1/events` | GET | List detected events |
+| `/api/v1/cameras/{id}` | GET/PUT/DELETE | Camera CRUD |
+| `/api/v1/cameras/{id}/stream/start` | POST | Start camera stream |
+| `/api/v1/cameras/{id}/stream/stop` | POST | Stop camera stream |
+| `/api/v1/cameras/{id}/frame` | GET | Get current frame (JPEG) |
+
+### Events
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/v1/events` | GET | List detection events |
 | `/api/v1/events/{id}` | GET | Event details |
-| `/api/v1/assistant/chat` | POST | Chat with AI assistant |
+| `/api/v1/events/{id}/image` | GET | Event snapshot image |
+
+### AI Assistant
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/v1/assistant/sessions` | GET/POST | List/Create chat sessions |
+| `/api/v1/assistant/sessions/{id}/chat` | POST | Send message to AI |
+| `/api/v1/assistant/sessions/{id}/messages` | GET | Get chat history |
+
+### Settings
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/v1/settings` | GET | Get user settings |
+| `/api/v1/settings` | PUT | Save user settings |
+
+### System & Models
+| Endpoint | Method | Description |
+|----------|--------|-------------|
 | `/api/v1/system/stats` | GET | System hardware stats |
-| `/api/v1/users` | GET/POST | User management |
-| `/api/v1/auth/login` | POST | User authentication |
+| `/api/v1/system/ollama-models` | GET | List Ollama models |
+| `/api/v1/system/yolo-models` | GET | List YOLO models |
+| `/api/v1/system/yolo-models/upload` | POST | Upload custom YOLO model |
+| `/api/v1/system/yolo-models/{name}/classes` | GET | Get model classes |
+| `/api/v1/system/yolo-models/{name}/activate` | POST | Activate YOLO model |
+| `/api/v1/system/yolo-models/{name}` | DELETE | Delete YOLO model |
+
+### Users (Admin)
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/v1/users` | GET/POST | List/Create users |
+| `/api/v1/users/{id}` | GET/PUT/DELETE | User CRUD |
 
 ## 🔒 Security
 

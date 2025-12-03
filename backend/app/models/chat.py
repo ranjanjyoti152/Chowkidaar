@@ -76,8 +76,8 @@ class ChatMessage(Base):
         nullable=True
     )
     
-    # Metadata
-    metadata: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Message metadata
+    message_metadata: Mapped[dict] = mapped_column(JSON, default=dict)
     
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(

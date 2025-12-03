@@ -13,8 +13,9 @@ from app.models.event import Event
 from app.models.chat import ChatSession, ChatMessage
 from app.schemas.chat import (
     ChatRequest, ChatResponse, ChatSessionCreate, ChatSessionResponse,
-    ChatMessageResponse, AssistantQuery
+    ChatMessageResponse, AssistantQuery, RelatedEventInfo
 )
+from app.models.camera import Camera
 from app.api.deps import get_current_user
 from app.services.ollama_vlm import get_vlm_service
 
@@ -54,19 +55,22 @@ async def chat_with_assistant(
     # Build context from events if requested
     context = ""
     related_events = []
+    events_with_images = []
     
     if request.include_events_context:
         # Get recent events for context
         if request.event_ids:
             events_query = (
-                select(Event)
+                select(Event, Camera.name.label("camera_name"))
+                .join(Camera, Event.camera_id == Camera.id)
                 .where(Event.user_id == current_user.id)
                 .where(Event.id.in_(request.event_ids))
             )
         else:
             # Get last 10 events with summaries
             events_query = (
-                select(Event)
+                select(Event, Camera.name.label("camera_name"))
+                .join(Camera, Event.camera_id == Camera.id)
                 .where(Event.user_id == current_user.id)
                 .where(Event.summary.isnot(None))
                 .order_by(Event.timestamp.desc())
@@ -74,16 +78,31 @@ async def chat_with_assistant(
             )
         
         result = await db.execute(events_query)
-        events = result.scalars().all()
+        rows = result.all()
         
-        if events:
+        if rows:
             context_parts = []
-            for event in events:
+            for row in rows:
+                event = row[0]
+                camera_name = row[1]
                 context_parts.append(
                     f"- [{event.timestamp.strftime('%Y-%m-%d %H:%M')}] "
                     f"{event.event_type.value}: {event.summary}"
                 )
                 related_events.append(event.id)
+                
+                # Add event with image info
+                events_with_images.append(RelatedEventInfo(
+                    id=event.id,
+                    event_type=event.event_type.value,
+                    severity=event.severity.value,
+                    timestamp=event.timestamp,
+                    summary=event.summary,
+                    frame_path=event.frame_path,
+                    thumbnail_path=event.thumbnail_path,
+                    camera_name=camera_name,
+                    detected_objects=event.detected_objects or []
+                ))
             context = "\n".join(context_parts)
     
     # Get chat history
@@ -121,7 +140,7 @@ async def chat_with_assistant(
         session_id=session.id,
         role="assistant",
         content=response,
-        metadata={"related_events": related_events}
+        message_metadata={"related_events": related_events}
     )
     db.add(assistant_message)
     
@@ -131,6 +150,7 @@ async def chat_with_assistant(
         message=response,
         session_id=session.id,
         related_events=related_events,
+        events_with_images=events_with_images,
         metadata={}
     )
 
@@ -213,11 +233,11 @@ async def query_events(
     """Query events using natural language"""
     vlm_service = await get_vlm_service()
     
-    # Build events query
+    # Build events query with camera join
     events_query = (
-        select(Event)
+        select(Event, Camera.name.label("camera_name"))
+        .join(Camera, Event.camera_id == Camera.id)
         .where(Event.user_id == current_user.id)
-        .where(Event.summary.isnot(None))
     )
     
     # Apply filters if provided
@@ -242,27 +262,47 @@ async def query_events(
     events_query = events_query.order_by(Event.timestamp.desc()).limit(query.limit)
     
     result = await db.execute(events_query)
-    events = result.scalars().all()
+    rows = result.all()
     
-    if not events:
+    if not rows:
         return ChatResponse(
             message="No events found matching your query criteria.",
             session_id=0,
             related_events=[],
+            events_with_images=[],
             metadata={}
         )
     
     # Build events summary
     events_summary = []
     related_events = []
-    for event in events:
+    events_with_images = []
+    
+    for row in rows:
+        event = row[0]
+        camera_name = row[1]
+        
         events_summary.append(
             f"Event #{event.id} [{event.timestamp.strftime('%Y-%m-%d %H:%M')}]\n"
+            f"Camera: {camera_name}\n"
             f"Type: {event.event_type.value}\n"
             f"Severity: {event.severity.value}\n"
-            f"Summary: {event.summary}\n"
+            f"Summary: {event.summary or 'No summary available'}\n"
         )
         related_events.append(event.id)
+        
+        # Add event with image info
+        events_with_images.append(RelatedEventInfo(
+            id=event.id,
+            event_type=event.event_type.value,
+            severity=event.severity.value,
+            timestamp=event.timestamp,
+            summary=event.summary,
+            frame_path=event.frame_path,
+            thumbnail_path=event.thumbnail_path,
+            camera_name=camera_name,
+            detected_objects=event.detected_objects or []
+        ))
     
     events_text = "\n---\n".join(events_summary)
     
@@ -276,7 +316,8 @@ async def query_events(
         message=response,
         session_id=0,
         related_events=related_events,
-        metadata={"events_count": len(events)}
+        events_with_images=events_with_images,
+        metadata={"events_count": len(rows)}
     )
 
 

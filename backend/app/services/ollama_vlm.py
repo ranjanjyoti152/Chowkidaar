@@ -108,14 +108,11 @@ class OllamaVLMService:
             if prompt:
                 full_prompt = prompt
             else:
-                full_prompt = f"""You are a security surveillance analyst. Analyze this security camera frame.
-{context}
-Provide a concise summary describing:
-1. What is happening in the scene
-2. Any potential security concerns
-3. Key details about detected objects or people
+                full_prompt = f"""Analyze this security camera frame. {context}
 
-Keep the response under 100 words and focus on factual observations."""
+Describe what you see in 2-3 simple sentences. Be factual and direct.
+Do not use markdown formatting, bullet points, or asterisks.
+Do not add notes, disclaimers, recommendations, or suggestions."""
             
             # Call Ollama API
             response = await client.post(
@@ -126,8 +123,8 @@ Keep the response under 100 words and focus on factual observations."""
                     "images": [image_base64],
                     "stream": False,
                     "options": {
-                        "temperature": 0.3,
-                        "num_predict": 200
+                        "temperature": 0.2,
+                        "num_predict": 150
                     }
                 }
             )

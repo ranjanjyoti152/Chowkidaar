@@ -30,6 +30,8 @@ export default function Login() {
           username: formData.username,
           password: formData.password,
         })
+        // First set tokens so the next API call has auth
+        useAuthStore.getState().setTokens(tokens.access_token, tokens.refresh_token)
         const user = await userApi.getCurrentUser()
         login(user, tokens.access_token, tokens.refresh_token)
         toast.success('Welcome back!')
@@ -65,12 +67,12 @@ export default function Login() {
             initial={{ scale: 0 }}
             animate={{ scale: 1 }}
             transition={{ type: 'spring', duration: 0.5 }}
-            className="w-20 h-20 mx-auto rounded-2xl bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center mb-4 shadow-lg shadow-primary-500/30"
+            className="w-20 h-20 mx-auto rounded-2xl bg-gradient-to-br from-primary-300 to-primary-500 flex items-center justify-center mb-4 shadow-xl shadow-primary-500/40"
           >
             <VideoCameraIcon className="w-10 h-10 text-white" />
           </motion.div>
           <h1 className="text-3xl font-bold text-gradient">Chowkidaar</h1>
-          <p className="text-gray-400 mt-2">AI-Powered Security System</p>
+          <p className="text-gray-300 mt-2">AI-Powered Security System</p>
         </div>
 
         {/* Form Card */}
@@ -78,20 +80,20 @@ export default function Login() {
           <div className="flex gap-4 mb-6">
             <button
               onClick={() => setIsLogin(true)}
-              className={`flex-1 py-2 rounded-xl text-sm font-medium transition-all ${
+              className={`flex-1 py-2 rounded-xl text-sm font-semibold transition-all ${
                 isLogin
-                  ? 'bg-primary-500/20 text-primary-400 border border-primary-500/30'
-                  : 'text-gray-400 hover:text-white'
+                  ? 'bg-primary-500/30 text-primary-300 border border-primary-400/50'
+                  : 'text-gray-300 hover:text-white'
               }`}
             >
               Login
             </button>
             <button
               onClick={() => setIsLogin(false)}
-              className={`flex-1 py-2 rounded-xl text-sm font-medium transition-all ${
+              className={`flex-1 py-2 rounded-xl text-sm font-semibold transition-all ${
                 !isLogin
-                  ? 'bg-primary-500/20 text-primary-400 border border-primary-500/30'
-                  : 'text-gray-400 hover:text-white'
+                  ? 'bg-primary-500/30 text-primary-300 border border-primary-400/50'
+                  : 'text-gray-300 hover:text-white'
               }`}
             >
               Register
@@ -168,7 +170,7 @@ export default function Login() {
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white"
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
                 >
                   {showPassword ? (
                     <EyeSlashIcon className="w-5 h-5" />
@@ -213,7 +215,7 @@ export default function Login() {
           </form>
         </div>
 
-        <p className="text-center text-gray-500 text-sm mt-6">
+        <p className="text-center text-gray-400 text-sm mt-6">
           Powered by YOLOv8+ & Ollama VLM
         </p>
       </motion.div>

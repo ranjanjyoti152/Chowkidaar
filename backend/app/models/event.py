@@ -10,22 +10,48 @@ from app.core.database import Base
 
 
 class EventType(str, enum.Enum):
-    PERSON_DETECTED = "person_detected"
-    VEHICLE_DETECTED = "vehicle_detected"
-    FIRE_DETECTED = "fire_detected"
-    SMOKE_DETECTED = "smoke_detected"
-    ANIMAL_DETECTED = "animal_detected"
-    MOTION_DETECTED = "motion_detected"
-    INTRUSION = "intrusion"
-    LOITERING = "loitering"
-    CUSTOM = "custom"
+    """Case-insensitive event type enum"""
+    person_detected = "person_detected"
+    vehicle_detected = "vehicle_detected"
+    fire_detected = "fire_detected"
+    smoke_detected = "smoke_detected"
+    animal_detected = "animal_detected"
+    motion_detected = "motion_detected"
+    intrusion = "intrusion"
+    loitering = "loitering"
+    custom = "custom"
+    
+    @classmethod
+    def _missing_(cls, value):
+        if isinstance(value, str):
+            lower_value = value.lower()
+            for member in cls:
+                if member.value == lower_value:
+                    return member
+        return None
+    
+    def __str__(self):
+        return self.value
 
 
 class EventSeverity(str, enum.Enum):
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-    CRITICAL = "critical"
+    """Case-insensitive event severity enum"""
+    low = "low"
+    medium = "medium"
+    high = "high"
+    critical = "critical"
+    
+    @classmethod
+    def _missing_(cls, value):
+        if isinstance(value, str):
+            lower_value = value.lower()
+            for member in cls:
+                if member.value == lower_value:
+                    return member
+        return None
+    
+    def __str__(self):
+        return self.value
 
 
 class Event(Base):
@@ -35,13 +61,13 @@ class Event(Base):
     
     # Event classification
     event_type: Mapped[EventType] = mapped_column(
-        SQLEnum(EventType),
+        SQLEnum(EventType, name='event_type', create_type=False, native_enum=True),
         nullable=False,
         index=True
     )
     severity: Mapped[EventSeverity] = mapped_column(
-        SQLEnum(EventSeverity),
-        default=EventSeverity.LOW,
+        SQLEnum(EventSeverity, name='event_severity', create_type=False, native_enum=True),
+        default=EventSeverity.low,
         nullable=False
     )
     

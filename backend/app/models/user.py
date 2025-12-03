@@ -10,9 +10,23 @@ from app.core.database import Base
 
 
 class UserRole(str, enum.Enum):
-    ADMIN = "admin"
-    OPERATOR = "operator"
-    VIEWER = "viewer"
+    """Case-insensitive user role enum"""
+    admin = "admin"
+    operator = "operator"
+    viewer = "viewer"
+    
+    @classmethod
+    def _missing_(cls, value):
+        """Handle case-insensitive lookup"""
+        if isinstance(value, str):
+            lower_value = value.lower()
+            for member in cls:
+                if member.value == lower_value:
+                    return member
+        return None
+    
+    def __str__(self):
+        return self.value
 
 
 class User(Base):
@@ -25,8 +39,8 @@ class User(Base):
     full_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     
     role: Mapped[UserRole] = mapped_column(
-        SQLEnum(UserRole),
-        default=UserRole.VIEWER,
+        SQLEnum(UserRole, name='user_role', create_type=False, native_enum=True),
+        default=UserRole.viewer,
         nullable=False
     )
     
@@ -60,6 +74,12 @@ class User(Base):
     chat_sessions: Mapped[List["ChatSession"]] = relationship(
         "ChatSession",
         back_populates="user",
+        lazy="selectin"
+    )
+    settings: Mapped[Optional["UserSettings"]] = relationship(
+        "UserSettings",
+        back_populates="user",
+        uselist=False,
         lazy="selectin"
     )
     

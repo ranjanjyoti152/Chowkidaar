@@ -13,14 +13,14 @@ class ChatMessageBase(BaseModel):
 
 class ChatMessageCreate(ChatMessageBase):
     event_id: Optional[int] = None
-    metadata: Dict[str, Any] = {}
+    message_metadata: Dict[str, Any] = {}
 
 
 class ChatMessageResponse(ChatMessageBase):
     id: int
     session_id: int
     event_id: Optional[int] = None
-    metadata: Dict[str, Any]
+    message_metadata: Dict[str, Any] = {}
     created_at: datetime
     
     class Config:
@@ -52,10 +52,26 @@ class ChatRequest(BaseModel):
     event_ids: Optional[List[int]] = None
 
 
+class RelatedEventInfo(BaseModel):
+    id: int
+    event_type: str
+    severity: str
+    timestamp: datetime
+    summary: Optional[str] = None
+    frame_path: Optional[str] = None
+    thumbnail_path: Optional[str] = None
+    camera_name: Optional[str] = None
+    detected_objects: List[Dict[str, Any]] = []
+    
+    class Config:
+        from_attributes = True
+
+
 class ChatResponse(BaseModel):
     message: str
     session_id: int
     related_events: List[int] = []
+    events_with_images: List[RelatedEventInfo] = []
     metadata: Dict[str, Any] = {}
 
 

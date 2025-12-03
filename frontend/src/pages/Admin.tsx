@@ -7,8 +7,6 @@ import {
   PencilIcon,
   TrashIcon,
   XMarkIcon,
-  ShieldCheckIcon,
-  KeyIcon,
 } from '@heroicons/react/24/outline'
 import { userApi } from '../services'
 import type { User, UserRole } from '../types'

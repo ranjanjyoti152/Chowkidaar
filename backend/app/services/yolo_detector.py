@@ -19,26 +19,26 @@ class YOLODetector:
     
     # Mapping YOLO classes to event types
     CLASS_EVENT_MAPPING = {
-        "person": EventType.PERSON_DETECTED,
-        "car": EventType.VEHICLE_DETECTED,
-        "truck": EventType.VEHICLE_DETECTED,
-        "bus": EventType.VEHICLE_DETECTED,
-        "motorcycle": EventType.VEHICLE_DETECTED,
-        "bicycle": EventType.VEHICLE_DETECTED,
-        "dog": EventType.ANIMAL_DETECTED,
-        "cat": EventType.ANIMAL_DETECTED,
-        "bird": EventType.ANIMAL_DETECTED,
-        "fire": EventType.FIRE_DETECTED,
-        "smoke": EventType.SMOKE_DETECTED,
+        "person": EventType.person_detected,
+        "car": EventType.vehicle_detected,
+        "truck": EventType.vehicle_detected,
+        "bus": EventType.vehicle_detected,
+        "motorcycle": EventType.vehicle_detected,
+        "bicycle": EventType.vehicle_detected,
+        "dog": EventType.animal_detected,
+        "cat": EventType.animal_detected,
+        "bird": EventType.animal_detected,
+        "fire": EventType.fire_detected,
+        "smoke": EventType.smoke_detected,
     }
     
     # Severity mapping based on detected class
     CLASS_SEVERITY_MAPPING = {
-        "fire": EventSeverity.CRITICAL,
-        "smoke": EventSeverity.HIGH,
-        "person": EventSeverity.MEDIUM,
-        "car": EventSeverity.LOW,
-        "truck": EventSeverity.LOW,
+        "fire": EventSeverity.critical,
+        "smoke": EventSeverity.high,
+        "person": EventSeverity.medium,
+        "car": EventSeverity.low,
+        "truck": EventSeverity.low,
     }
     
     def __init__(self):

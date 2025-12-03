@@ -8,16 +8,18 @@ import {
   CheckCircleIcon,
 } from '@heroicons/react/24/outline'
 import { cameraApi, eventApi, systemApi } from '../services'
+import { useAuthStore } from '../store/authStore'
 import type { EventSeverity } from '../types'
 
 const severityColors: Record<EventSeverity, string> = {
-  low: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-  medium: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
-  high: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
-  critical: 'bg-red-500/20 text-red-400 border-red-500/30',
+  low: 'bg-blue-500/30 text-blue-300 border-blue-400/50',
+  medium: 'bg-yellow-500/30 text-yellow-300 border-yellow-400/50',
+  high: 'bg-orange-500/30 text-orange-300 border-orange-400/50',
+  critical: 'bg-red-500/30 text-red-300 border-red-400/50',
 }
 
 export default function Dashboard() {
+  const { token } = useAuthStore()
   const { data: cameras, isLoading: camerasLoading } = useQuery({
     queryKey: ['cameras'],
     queryFn: cameraApi.listCameras,
@@ -28,7 +30,7 @@ export default function Dashboard() {
     queryFn: () => eventApi.listEvents({ limit: 10 }),
   })
 
-  const { data: stats, isLoading: statsLoading } = useQuery({
+  const { data: stats } = useQuery({
     queryKey: ['eventStats'],
     queryFn: eventApi.getStats,
   })
@@ -75,7 +77,7 @@ export default function Dashboard() {
       <div className="page-header">
         <div>
           <h1 className="page-title">Dashboard</h1>
-          <p className="text-gray-400 mt-1">Welcome to Chowkidaar NVR</p>
+          <p className="text-gray-300 mt-1">Welcome to Chowkidaar NVR</p>
         </div>
       </div>
 
@@ -91,7 +93,7 @@ export default function Dashboard() {
           >
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-400">{stat.name}</p>
+                <p className="text-sm text-gray-300">{stat.name}</p>
                 <p className="text-3xl font-bold text-white mt-1">{stat.value}</p>
               </div>
               <div
@@ -122,7 +124,7 @@ export default function Dashboard() {
                   <div key={camera.id} className="relative video-container">
                     {camera.status === 'online' ? (
                       <img
-                        src={`/api/v1/cameras/${camera.id}/stream`}
+                        src={`${cameraApi.getStreamUrl(camera.id)}?token=${token}`}
                         alt={camera.name}
                         className="w-full h-full object-cover"
                       />
@@ -175,26 +177,26 @@ export default function Dashboard() {
                   key={event.id}
                   initial={{ opacity: 0, x: -20 }}
                   animate={{ opacity: 1, x: 0 }}
-                  className="flex items-center gap-3 p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors cursor-pointer"
+                  className="flex items-center gap-3 p-3 rounded-xl bg-white/10 hover:bg-white/15 transition-colors cursor-pointer"
                 >
                   <div
                     className={`w-10 h-10 rounded-lg flex items-center justify-center ${
                       event.is_acknowledged
-                        ? 'bg-green-500/20'
-                        : 'bg-red-500/20'
+                        ? 'bg-green-500/30'
+                        : 'bg-red-500/30'
                     }`}
                   >
                     {event.is_acknowledged ? (
-                      <CheckCircleIcon className="w-5 h-5 text-green-400" />
+                      <CheckCircleIcon className="w-5 h-5 text-green-300" />
                     ) : (
-                      <ExclamationTriangleIcon className="w-5 h-5 text-red-400" />
+                      <ExclamationTriangleIcon className="w-5 h-5 text-red-300" />
                     )}
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm text-white font-medium truncate">
                       {event.event_type.replace('_', ' ')}
                     </p>
-                    <p className="text-xs text-gray-400 truncate">
+                    <p className="text-xs text-gray-300 truncate">
                       {event.camera_name}
                     </p>
                   </div>
@@ -223,14 +225,14 @@ export default function Dashboard() {
             {/* CPU */}
             <div>
               <div className="flex items-center justify-between mb-2">
-                <span className="text-sm text-gray-400">CPU</span>
-                <span className="text-sm text-white">
+                <span className="text-sm text-gray-300">CPU</span>
+                <span className="text-sm font-medium text-white">
                   {systemStats.cpu.usage_percent.toFixed(1)}%
                 </span>
               </div>
-              <div className="h-2 bg-white/10 rounded-full overflow-hidden">
+              <div className="h-2.5 bg-white/15 rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-gradient-to-r from-primary-400 to-primary-600 transition-all"
+                  className="h-full bg-gradient-to-r from-primary-400 to-primary-500 transition-all"
                   style={{ width: `${systemStats.cpu.usage_percent}%` }}
                 />
               </div>
@@ -239,12 +241,12 @@ export default function Dashboard() {
             {/* Memory */}
             <div>
               <div className="flex items-center justify-between mb-2">
-                <span className="text-sm text-gray-400">Memory</span>
-                <span className="text-sm text-white">
+                <span className="text-sm text-gray-300">Memory</span>
+                <span className="text-sm font-medium text-white">
                   {systemStats.memory.usage_percent.toFixed(1)}%
                 </span>
               </div>
-              <div className="h-2 bg-white/10 rounded-full overflow-hidden">
+              <div className="h-2.5 bg-white/15 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-gradient-to-r from-green-400 to-emerald-500 transition-all"
                   style={{ width: `${systemStats.memory.usage_percent}%` }}
@@ -256,12 +258,12 @@ export default function Dashboard() {
             {systemStats.gpus && systemStats.gpus.length > 0 && (
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm text-gray-400">GPU</span>
-                  <span className="text-sm text-white">
+                  <span className="text-sm text-gray-300">GPU</span>
+                  <span className="text-sm font-medium text-white">
                     {systemStats.gpus[0].usage_percent.toFixed(1)}%
                   </span>
                 </div>
-                <div className="h-2 bg-white/10 rounded-full overflow-hidden">
+                <div className="h-2.5 bg-white/15 rounded-full overflow-hidden">
                   <div
                     className="h-full bg-gradient-to-r from-purple-400 to-pink-500 transition-all"
                     style={{ width: `${systemStats.gpus[0].usage_percent}%` }}
@@ -274,12 +276,12 @@ export default function Dashboard() {
             {systemStats.disks && systemStats.disks.length > 0 && (
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm text-gray-400">Disk</span>
-                  <span className="text-sm text-white">
+                  <span className="text-sm text-gray-300">Disk</span>
+                  <span className="text-sm font-medium text-white">
                     {systemStats.disks[0].usage_percent.toFixed(1)}%
                   </span>
                 </div>
-                <div className="h-2 bg-white/10 rounded-full overflow-hidden">
+                <div className="h-2.5 bg-white/15 rounded-full overflow-hidden">
                   <div
                     className="h-full bg-gradient-to-r from-yellow-400 to-orange-500 transition-all"
                     style={{ width: `${systemStats.disks[0].usage_percent}%` }}

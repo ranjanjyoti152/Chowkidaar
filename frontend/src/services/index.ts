@@ -236,6 +236,11 @@ export const systemApi = {
     return response.data
   },
   
+  testOllamaConnection: async (url?: string): Promise<{ status: string; url: string; models: string[]; model_count?: number; error?: string }> => {
+    const response = await api.post('/system/ollama/test', null, { params: url ? { url } : {} })
+    return response.data
+  },
+  
   restartDetector: async (): Promise<{ message: string }> => {
     const response = await api.post('/system/restart-detector')
     return response.data
@@ -243,6 +248,75 @@ export const systemApi = {
   
   clearStreams: async (): Promise<{ message: string }> => {
     const response = await api.post('/system/clear-streams')
+    return response.data
+  },
+  
+  // YOLO Model Management
+  getYoloModels: async (): Promise<{ models: Array<{ name: string; display_name: string; type: string; size: string; path?: string }> }> => {
+    const response = await api.get('/system/yolo-models')
+    return response.data
+  },
+  
+  uploadYoloModel: async (formData: FormData): Promise<{ message: string; model: unknown }> => {
+    const response = await api.post('/system/yolo-models/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+    return response.data
+  },
+  
+  deleteYoloModel: async (modelName: string): Promise<{ message: string }> => {
+    const response = await api.delete(`/system/yolo-models/${modelName}`)
+    return response.data
+  },
+  
+  getModelClasses: async (modelName: string): Promise<{ model: string; classes: string[]; class_count: number }> => {
+    const response = await api.get(`/system/yolo-models/${modelName}/classes`)
+    return response.data
+  },
+  
+  activateYoloModel: async (modelName: string): Promise<{ message: string; model: string }> => {
+    const response = await api.post(`/system/yolo-models/${modelName}/activate`)
+    return response.data
+  },
+}
+
+// Settings API
+export interface SettingsData {
+  detection: {
+    model: string
+    confidence_threshold: number
+    enabled_classes: string[]
+    inference_device: string
+  }
+  vlm: {
+    model: string
+    ollama_url: string
+    auto_summarize: boolean
+    summarize_delay_seconds: number
+  }
+  storage: {
+    recordings_path: string
+    snapshots_path: string
+    max_storage_gb: number
+    retention_days: number
+  }
+  notifications: {
+    enabled: boolean
+    email_enabled: boolean
+    email_recipients: string[]
+    min_severity: string
+  }
+  updated_at?: string
+}
+
+export const settingsApi = {
+  get: async (): Promise<SettingsData> => {
+    const response = await api.get('/settings')
+    return response.data
+  },
+  
+  update: async (data: Partial<SettingsData>): Promise<SettingsData> => {
+    const response = await api.put('/settings', data)
     return response.data
   },
 }

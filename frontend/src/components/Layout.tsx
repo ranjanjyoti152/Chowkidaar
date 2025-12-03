@@ -54,19 +54,19 @@ export default function Layout() {
       {/* Sidebar */}
       <aside
         className={clsx(
-          'fixed top-0 left-0 z-50 h-full w-64 glass-card border-r border-white/10 transition-transform duration-300 lg:translate-x-0',
+          'fixed top-0 left-0 z-50 h-full w-64 glass-card border-r border-white/15 transition-transform duration-300 lg:translate-x-0',
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         )}
       >
         <div className="flex h-full flex-col">
           {/* Logo */}
-          <div className="flex items-center gap-3 px-6 py-5 border-b border-white/10">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center">
+          <div className="flex items-center gap-3 px-6 py-5 border-b border-white/15">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-300 to-primary-500 flex items-center justify-center shadow-lg shadow-primary-500/30">
               <VideoCameraIcon className="w-6 h-6 text-white" />
             </div>
             <div>
               <h1 className="text-xl font-bold text-gradient">Chowkidaar</h1>
-              <p className="text-xs text-gray-500">AI Security System</p>
+              <p className="text-xs text-gray-400">AI Security System</p>
             </div>
           </div>
 
@@ -81,8 +81,8 @@ export default function Layout() {
                   clsx(
                     'flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200',
                     isActive
-                      ? 'bg-gradient-to-r from-primary-500/20 to-transparent text-white border-l-2 border-primary-500'
-                      : 'text-gray-400 hover:text-white hover:bg-white/5'
+                      ? 'bg-gradient-to-r from-primary-500/30 to-primary-500/10 text-white border-l-2 border-primary-400'
+                      : 'text-gray-300 hover:text-white hover:bg-white/10'
                   )
                 }
               >
@@ -93,22 +93,22 @@ export default function Layout() {
           </nav>
 
           {/* User section */}
-          <div className="px-4 py-4 border-t border-white/10">
+          <div className="px-4 py-4 border-t border-white/15">
             <div className="flex items-center gap-3 px-4 py-3">
-              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center">
-                <span className="text-white font-medium">
+              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary-300 to-primary-500 flex items-center justify-center shadow-lg shadow-primary-500/30">
+                <span className="text-white font-semibold">
                   {user?.username?.charAt(0).toUpperCase() || 'U'}
                 </span>
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-white truncate">
+                <p className="text-sm font-semibold text-white truncate">
                   {user?.full_name || user?.username}
                 </p>
-                <p className="text-xs text-gray-500 capitalize">{user?.role}</p>
+                <p className="text-xs text-gray-400 capitalize">{user?.role}</p>
               </div>
               <button
                 onClick={handleLogout}
-                className="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
+                className="p-2 rounded-lg text-gray-300 hover:text-white hover:bg-white/15 transition-colors"
                 title="Logout"
               >
                 <ArrowRightOnRectangleIcon className="w-5 h-5" />
@@ -121,20 +121,20 @@ export default function Layout() {
       {/* Main content */}
       <div className="lg:pl-64">
         {/* Top bar */}
-        <header className="sticky top-0 z-30 glass-card border-b border-white/10">
+        <header className="sticky top-0 z-30 glass-card border-b border-white/15">
           <div className="flex items-center justify-between px-4 py-3">
             <button
               onClick={() => setSidebarOpen(true)}
-              className="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 lg:hidden"
+              className="p-2 rounded-lg text-gray-300 hover:text-white hover:bg-white/15 lg:hidden"
             >
               <Bars3Icon className="w-6 h-6" />
             </button>
             
             <div className="flex items-center gap-4">
               {/* Status indicator */}
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-green-500/20 border border-green-500/30">
-                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                <span className="text-xs text-green-400 font-medium">System Online</span>
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-green-500/30 border border-green-400/50">
+                <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse shadow-lg shadow-green-400/50" />
+                <span className="text-xs text-green-300 font-semibold">System Online</span>
               </div>
             </div>
           </div>

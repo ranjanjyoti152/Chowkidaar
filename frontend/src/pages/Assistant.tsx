@@ -10,18 +10,26 @@ import {
   ArrowPathIcon,
   PlusIcon,
   ClockIcon,
+  PhotoIcon,
 } from '@heroicons/react/24/outline'
 import { assistantApi } from '../services'
-import type { ChatSession, ChatMessage } from '../types'
+import { useAuthStore } from '../store/authStore'
+import type { ChatSession, ChatMessage, RelatedEventInfo } from '../types'
 import toast from 'react-hot-toast'
+
+// Extended message type to include events with images
+interface ExtendedChatMessage extends ChatMessage {
+  events_with_images?: RelatedEventInfo[]
+}
 
 export default function Assistant() {
   const [input, setInput] = useState('')
   const [currentSessionId, setCurrentSessionId] = useState<number | null>(null)
-  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [messages, setMessages] = useState<ExtendedChatMessage[]>([])
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const queryClient = useQueryClient()
+  const { token } = useAuthStore()
 
   const { data: sessions } = useQuery({
     queryKey: ['chatSessions'],
@@ -53,7 +61,7 @@ export default function Assistant() {
     mutationFn: assistantApi.chat,
     onMutate: (data) => {
       // Add user message immediately
-      const userMessage: ChatMessage = {
+      const userMessage: ExtendedChatMessage = {
         id: Date.now(),
         role: 'user',
         content: data.message,
@@ -62,12 +70,13 @@ export default function Assistant() {
       setMessages((prev) => [...prev, userMessage])
     },
     onSuccess: (response) => {
-      // Add assistant response
-      const assistantMessage: ChatMessage = {
+      // Add assistant response with events_with_images
+      const assistantMessage: ExtendedChatMessage = {
         id: Date.now() + 1,
         role: 'assistant',
-        content: response.response,
+        content: response.message,
         created_at: new Date().toISOString(),
+        events_with_images: response.events_with_images,
       }
       setMessages((prev) => [...prev, assistantMessage])
       
@@ -135,8 +144,8 @@ export default function Assistant() {
           </button>
 
           <div className="glass-card flex-1 overflow-hidden flex flex-col">
-            <div className="p-4 border-b border-white/10">
-              <h2 className="text-sm font-medium text-gray-400">Recent Chats</h2>
+            <div className="p-4 border-b border-white/15">
+              <h2 className="text-sm font-semibold text-gray-300">Recent Chats</h2>
             </div>
             <div className="flex-1 overflow-y-auto p-2 space-y-1">
               {sessions?.map((session) => (
@@ -145,21 +154,21 @@ export default function Assistant() {
                   onClick={() => selectSession(session)}
                   className={`w-full text-left p-3 rounded-xl transition-all ${
                     currentSessionId === session.id
-                      ? 'bg-primary-500/20 text-primary-400'
-                      : 'text-gray-400 hover:text-white hover:bg-white/5'
+                      ? 'bg-primary-500/30 text-primary-300'
+                      : 'text-gray-300 hover:text-white hover:bg-white/10'
                   }`}
                 >
                   <p className="text-sm font-medium truncate">
                     {session.title || 'New Chat'}
                   </p>
-                  <p className="text-xs text-gray-500 mt-1 flex items-center gap-1">
+                  <p className="text-xs text-gray-400 mt-1 flex items-center gap-1">
                     <ClockIcon className="w-3 h-3" />
                     {format(new Date(session.created_at), 'MMM d, HH:mm')}
                   </p>
                 </motion.button>
               ))}
               {(!sessions || sessions.length === 0) && (
-                <p className="text-center text-sm text-gray-500 py-4">
+                <p className="text-center text-sm text-gray-400 py-4">
                   No chat history
                 </p>
               )}
@@ -170,14 +179,14 @@ export default function Assistant() {
         {/* Main Chat Area */}
         <div className="flex-1 flex flex-col glass-card overflow-hidden">
           {/* Header */}
-          <div className="flex items-center justify-between p-4 border-b border-white/10">
+          <div className="flex items-center justify-between p-4 border-b border-white/15">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-300 to-primary-500 flex items-center justify-center shadow-lg shadow-primary-500/30">
                 <SparklesIcon className="w-5 h-5 text-white" />
               </div>
               <div>
                 <h1 className="text-lg font-semibold text-white">AI Assistant</h1>
-                <p className="text-sm text-gray-400">
+                <p className="text-sm text-gray-300">
                   Ask questions about your security events
                 </p>
               </div>
@@ -197,13 +206,13 @@ export default function Assistant() {
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
             {messages.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-center">
-                <div className="w-16 h-16 rounded-2xl bg-primary-500/20 flex items-center justify-center mb-4">
-                  <ChatBubbleLeftRightIcon className="w-8 h-8 text-primary-400" />
+                <div className="w-16 h-16 rounded-2xl bg-primary-500/30 flex items-center justify-center mb-4 shadow-lg shadow-primary-500/30">
+                  <ChatBubbleLeftRightIcon className="w-8 h-8 text-primary-300" />
                 </div>
                 <h2 className="text-xl font-semibold text-white mb-2">
                   How can I help you?
                 </h2>
-                <p className="text-gray-400 max-w-md mb-6">
+                <p className="text-gray-300 max-w-md mb-6">
                   I can help you understand your security events, search through
                   recordings, and provide insights about activity patterns.
                 </p>
@@ -211,13 +220,13 @@ export default function Assistant() {
                 {/* Suggestions */}
                 {suggestions?.suggestions && suggestions.suggestions.length > 0 && (
                   <div className="w-full max-w-2xl">
-                    <p className="text-sm text-gray-500 mb-3">Try asking:</p>
+                    <p className="text-sm text-gray-400 mb-3">Try asking:</p>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                       {suggestions.suggestions.map((suggestion, i) => (
                         <button
                           key={i}
                           onClick={() => handleSuggestionClick(suggestion)}
-                          className="text-left p-4 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 text-sm transition-colors"
+                          className="text-left p-4 rounded-xl bg-white/10 hover:bg-white/15 text-gray-200 text-sm transition-colors border border-white/10 hover:border-primary-500/30"
                         >
                           {suggestion}
                         </button>
@@ -235,22 +244,71 @@ export default function Assistant() {
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       className={`flex gap-3 ${
-                        message.role === 'user' ? 'justify-end' : ''
+                        message.role === 'user' ? 'flex-row-reverse' : 'flex-row'
                       }`}
                     >
                       {message.role === 'assistant' && (
-                        <div className="w-8 h-8 rounded-lg bg-primary-500/20 flex items-center justify-center flex-shrink-0">
-                          <SparklesIcon className="w-4 h-4 text-primary-400" />
+                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-300 to-primary-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-primary-500/30">
+                          <SparklesIcon className="w-5 h-5 text-white" />
                         </div>
                       )}
                       <div
-                        className={`max-w-[70%] p-4 rounded-2xl ${
+                        className={`max-w-[75%] ${
                           message.role === 'user'
-                            ? 'bg-primary-500 text-white rounded-br-md'
-                            : 'bg-white/10 text-gray-200 rounded-bl-md'
+                            ? 'bg-primary-500 text-white rounded-2xl rounded-tr-md px-5 py-3 shadow-lg shadow-primary-500/30'
+                            : 'bg-dark-400/90 text-gray-100 rounded-2xl rounded-tl-md border border-white/15 px-5 py-3'
                         }`}
                       >
-                        <p className="whitespace-pre-wrap">{message.content}</p>
+                        <p className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</p>
+                        
+                        {/* Display related event images */}
+                        {message.role === 'assistant' && message.events_with_images && message.events_with_images.length > 0 && (
+                          <div className="mt-4 space-y-3">
+                            <div className="flex items-center gap-2 text-xs text-cyan-400 font-medium">
+                              <PhotoIcon className="w-4 h-4" />
+                              <span>Related Events ({message.events_with_images.length})</span>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                              {message.events_with_images.map((event) => (
+                                <div key={event.id} className="relative group bg-dark-800 rounded-xl overflow-hidden border border-white/10 hover:border-primary-500/50 transition-all">
+                                  <div className="aspect-video bg-dark-700">
+                                    {event.frame_path ? (
+                                      <img
+                                        src={`/api/v1/events/${event.id}/frame?token=${token}`}
+                                        alt={`Event ${event.id}`}
+                                        className="w-full h-full object-cover"
+                                        onError={(e) => {
+                                          (e.target as HTMLImageElement).style.display = 'none';
+                                        }}
+                                      />
+                                    ) : (
+                                      <div className="w-full h-full flex items-center justify-center">
+                                        <PhotoIcon className="w-8 h-8 text-gray-600" />
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div className="p-2 bg-dark-800">
+                                    <div className="flex items-center justify-between">
+                                      <p className="text-xs text-white font-medium truncate">Event {event.id}</p>
+                                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                                        event.severity === 'critical' ? 'bg-red-500 text-white' :
+                                        event.severity === 'high' ? 'bg-orange-500 text-white' :
+                                        event.severity === 'medium' ? 'bg-yellow-500 text-black' :
+                                        'bg-cyan-500 text-white'
+                                      }`}>
+                                        {event.event_type.replace('_', ' ')}
+                                      </span>
+                                    </div>
+                                    <p className="text-[10px] text-gray-400 mt-1">
+                                      {event.camera_name} • {format(new Date(event.timestamp), 'MMM d, HH:mm')}
+                                    </p>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        
                         <p
                           className={`text-xs mt-2 ${
                             message.role === 'user'
@@ -262,8 +320,8 @@ export default function Assistant() {
                         </p>
                       </div>
                       {message.role === 'user' && (
-                        <div className="w-8 h-8 rounded-lg bg-primary-500 flex items-center justify-center flex-shrink-0">
-                          <span className="text-sm text-white font-medium">Y</span>
+                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-300 to-blue-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-blue-500/30">
+                          <span className="text-sm text-white font-bold">R</span>
                         </div>
                       )}
                     </motion.div>
@@ -276,19 +334,19 @@ export default function Assistant() {
                     animate={{ opacity: 1 }}
                     className="flex gap-3"
                   >
-                    <div className="w-8 h-8 rounded-lg bg-primary-500/20 flex items-center justify-center flex-shrink-0">
-                      <ArrowPathIcon className="w-4 h-4 text-primary-400 animate-spin" />
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-300 to-primary-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-primary-500/30">
+                      <ArrowPathIcon className="w-5 h-5 text-white animate-spin" />
                     </div>
-                    <div className="bg-white/10 rounded-2xl rounded-bl-md p-4">
-                      <div className="flex gap-1">
-                        <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
+                    <div className="bg-dark-400/90 border border-white/15 rounded-2xl rounded-tl-md px-5 py-4">
+                      <div className="flex gap-1.5">
+                        <span className="w-2 h-2 bg-primary-400 rounded-full animate-bounce" />
                         <span
-                          className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
-                          style={{ animationDelay: '0.1s' }}
+                          className="w-2 h-2 bg-primary-400 rounded-full animate-bounce"
+                          style={{ animationDelay: '0.15s' }}
                         />
                         <span
-                          className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
-                          style={{ animationDelay: '0.2s' }}
+                          className="w-2 h-2 bg-primary-400 rounded-full animate-bounce"
+                          style={{ animationDelay: '0.3s' }}
                         />
                       </div>
                     </div>
@@ -301,7 +359,7 @@ export default function Assistant() {
           </div>
 
           {/* Input */}
-          <form onSubmit={handleSubmit} className="p-4 border-t border-white/10">
+          <form onSubmit={handleSubmit} className="p-4 border-t border-white/15">
             <div className="flex gap-3">
               <textarea
                 ref={inputRef}
@@ -326,7 +384,7 @@ export default function Assistant() {
                 <PaperAirplaneIcon className="w-5 h-5" />
               </button>
             </div>
-            <p className="text-xs text-gray-500 mt-2">
+            <p className="text-xs text-gray-400 mt-2">
               Press Enter to send, Shift+Enter for new line
             </p>
           </form>

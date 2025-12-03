@@ -12,11 +12,13 @@ import sys
 from pathlib import Path
 
 from app.core.config import settings
-from app.core.database import init_db, close_db
+from app.core.database import init_db, close_db, AsyncSessionLocal
 from app.api import api_router
 from app.services.yolo_detector import get_detector
 from app.services.stream_handler import get_stream_manager
 from app.services.ollama_vlm import get_vlm_service
+from app.services.detection_service import get_detection_service
+from sqlalchemy import select
 
 
 # Configure logging
@@ -71,12 +73,58 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"❌ Ollama error: {e}")
     
+    # Start all enabled camera streams automatically
+    logger.info("Starting enabled camera streams...")
+    try:
+        from app.models.camera import Camera
+        stream_manager = get_stream_manager()
+        
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(Camera).where(Camera.is_enabled == True)
+            )
+            cameras = result.scalars().all()
+            
+            started_count = 0
+            for camera in cameras:
+                try:
+                    logger.info(f"Starting stream for camera {camera.id}: {camera.name}")
+                    await stream_manager.add_stream(
+                        camera_id=camera.id,
+                        stream_url=camera.stream_url,
+                        fps=camera.fps or 15
+                    )
+                    started_count += 1
+                except Exception as e:
+                    logger.error(f"Failed to start camera {camera.id}: {e}")
+            
+            logger.info(f"✅ Started {started_count}/{len(cameras)} camera streams")
+    except Exception as e:
+        logger.error(f"❌ Error starting camera streams: {e}")
+    
+    # Start detection service
+    logger.info("Starting detection service...")
+    try:
+        detection_service = await get_detection_service()
+        await detection_service.start()
+        logger.info("✅ Detection service started")
+    except Exception as e:
+        logger.error(f"❌ Detection service error: {e}")
+    
     logger.info(f"🛡️ {settings.app_name} is ready!")
     
     yield
     
     # Shutdown
     logger.info("Shutting down...")
+    
+    # Stop detection service
+    try:
+        detection_service = await get_detection_service()
+        await detection_service.stop()
+        logger.info("Detection service stopped")
+    except Exception as e:
+        logger.error(f"Error stopping detection service: {e}")
     
     # Stop all streams
     stream_manager = get_stream_manager()

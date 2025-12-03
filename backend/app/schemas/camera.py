@@ -3,7 +3,7 @@ Chowkidaar NVR - Camera Schemas
 """
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, field_validator
 from app.models.camera import CameraStatus, CameraType
 
 
@@ -11,8 +11,15 @@ class CameraBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
     stream_url: str
-    camera_type: CameraType = CameraType.RTSP
+    camera_type: CameraType = CameraType.rtsp
     location: Optional[str] = None
+    
+    @field_validator('camera_type', mode='before')
+    @classmethod
+    def normalize_camera_type(cls, v):
+        if isinstance(v, str):
+            return v.lower()
+        return v
 
 
 class CameraCreate(CameraBase):
@@ -36,6 +43,13 @@ class CameraUpdate(BaseModel):
     detection_enabled: Optional[bool] = None
     recording_enabled: Optional[bool] = None
     fps: Optional[int] = Field(None, ge=1, le=60)
+    
+    @field_validator('camera_type', mode='before')
+    @classmethod
+    def normalize_camera_type(cls, v):
+        if isinstance(v, str):
+            return v.lower()
+        return v
 
 
 class CameraResponse(CameraBase):

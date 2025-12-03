@@ -189,17 +189,17 @@ class EventProcessor:
         
         # Return highest severity
         severity_order = [
-            EventSeverity.CRITICAL,
-            EventSeverity.HIGH,
-            EventSeverity.MEDIUM,
-            EventSeverity.LOW
+            EventSeverity.critical,
+            EventSeverity.high,
+            EventSeverity.medium,
+            EventSeverity.low
         ]
         
         for sev in severity_order:
             if sev in severities:
                 return sev
         
-        return EventSeverity.LOW
+        return EventSeverity.low
     
     async def _save_frame(
         self,

@@ -2,7 +2,7 @@
 Chowkidaar NVR - Camera Management Routes
 """
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -19,6 +19,7 @@ from app.schemas.camera import (
     CameraStatusUpdate, CameraTestResult
 )
 from app.api.deps import get_current_user, require_operator
+from app.services.yolo_detector import get_detector
 from app.services.stream_handler import get_stream_manager
 
 router = APIRouter(prefix="/cameras", tags=["Cameras"])
@@ -75,16 +76,34 @@ async def create_camera(
     current_user: User = Depends(require_operator),
     db: AsyncSession = Depends(get_db)
 ):
-    """Create a new camera"""
+    """Create a new camera and automatically start stream"""
     camera = Camera(
         **camera_create.model_dump(),
         owner_id=current_user.id,
-        status=CameraStatus.OFFLINE
+        status=CameraStatus.connecting
     )
     
     db.add(camera)
     await db.commit()
     await db.refresh(camera)
+    
+    # Auto-start stream
+    stream_manager = get_stream_manager()
+    try:
+        handler = await stream_manager.add_stream(
+            camera_id=camera.id,
+            stream_url=camera.stream_url,
+            fps=camera.fps
+        )
+        camera.status = handler.get_status()
+        camera.last_seen = datetime.utcnow()
+        await db.commit()
+        await db.refresh(camera)
+    except Exception as e:
+        camera.status = CameraStatus.error
+        camera.error_message = str(e)
+        await db.commit()
+        await db.refresh(camera)
     
     return camera
 
@@ -303,7 +322,7 @@ async def stop_camera_stream(
     stream_manager = get_stream_manager()
     await stream_manager.remove_stream(camera_id)
     
-    camera.status = CameraStatus.DISABLED
+    camera.status = CameraStatus.disabled
     await db.commit()
     
     return {"message": "Stream stopped"}
@@ -312,10 +331,11 @@ async def stop_camera_stream(
 @router.get("/{camera_id}/stream")
 async def stream_camera(
     camera_id: int,
+    detection: bool = Query(True, description="Enable YOLO detection overlay"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get MJPEG stream for camera"""
+    """Get MJPEG stream for camera with optional detection overlay"""
     result = await db.execute(
         select(Camera)
         .where(Camera.id == camera_id)
@@ -332,15 +352,55 @@ async def stream_camera(
     stream_manager = get_stream_manager()
     handler = stream_manager.get_stream(camera_id)
     
+    # Auto-start stream if not running
     if not handler or not handler.is_connected():
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Stream not available"
+        handler = await stream_manager.add_stream(
+            camera_id=camera.id,
+            stream_url=camera.stream_url,
+            fps=camera.fps
         )
+        # Update camera status
+        camera.status = handler.get_status()
+        camera.last_seen = datetime.utcnow()
+        await db.commit()
+        
+        # Wait a bit for connection
+        await asyncio.sleep(1)
+        
+        if not handler.is_connected():
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Failed to connect to camera stream: {handler.info.error_message or 'Connection timeout'}"
+            )
+    
+    # Get detector if detection enabled
+    detector = None
+    if detection and camera.detection_enabled:
+        detector = await get_detector()
     
     async def generate():
+        frame_count = 0
+        last_detections = []  # Keep last detections for smooth overlay
+        
         async for frame in handler.frame_generator():
-            _, buffer = cv2.imencode('.jpg', frame)
+            output_frame = frame
+            
+            # Run detection every 5th frame to reduce CPU load
+            if detector and frame_count % 5 == 0:
+                try:
+                    detection_result = await detector.detect(frame)
+                    detections = detection_result.get("objects", [])
+                    if detections:
+                        last_detections = detections  # Update last detections
+                except Exception as e:
+                    pass  # Silently continue on detection errors
+            
+            # Always draw last known detections
+            if detector and last_detections:
+                output_frame = detector.draw_detections(frame, last_detections)
+            
+            frame_count += 1
+            _, buffer = cv2.imencode('.jpg', output_frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
             yield (
                 b'--frame\r\n'
                 b'Content-Type: image/jpeg\r\n\r\n' +

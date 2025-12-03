@@ -10,17 +10,43 @@ from app.core.database import Base
 
 
 class CameraStatus(str, enum.Enum):
-    ONLINE = "online"
-    OFFLINE = "offline"
-    CONNECTING = "connecting"
-    ERROR = "error"
-    DISABLED = "disabled"
+    """Case-insensitive camera status enum"""
+    online = "online"
+    offline = "offline"
+    connecting = "connecting"
+    error = "error"
+    disabled = "disabled"
+    
+    @classmethod
+    def _missing_(cls, value):
+        if isinstance(value, str):
+            lower_value = value.lower()
+            for member in cls:
+                if member.value == lower_value:
+                    return member
+        return None
+    
+    def __str__(self):
+        return self.value
 
 
 class CameraType(str, enum.Enum):
-    RTSP = "rtsp"
-    HTTP = "http"
-    ONVIF = "onvif"
+    """Case-insensitive camera type enum"""
+    rtsp = "rtsp"
+    http = "http"
+    onvif = "onvif"
+    
+    @classmethod
+    def _missing_(cls, value):
+        if isinstance(value, str):
+            lower_value = value.lower()
+            for member in cls:
+                if member.value == lower_value:
+                    return member
+        return None
+    
+    def __str__(self):
+        return self.value
 
 
 class Camera(Base):
@@ -33,8 +59,8 @@ class Camera(Base):
     # Connection settings
     stream_url: Mapped[str] = mapped_column(String(500), nullable=False)
     camera_type: Mapped[CameraType] = mapped_column(
-        SQLEnum(CameraType),
-        default=CameraType.RTSP,
+        SQLEnum(CameraType, name='camera_type', create_type=False, native_enum=True),
+        default=CameraType.rtsp,
         nullable=False
     )
     
@@ -44,8 +70,8 @@ class Camera(Base):
     
     # Status tracking
     status: Mapped[CameraStatus] = mapped_column(
-        SQLEnum(CameraStatus),
-        default=CameraStatus.OFFLINE,
+        SQLEnum(CameraStatus, name='camera_status', create_type=False, native_enum=True),
+        default=CameraStatus.offline,
         nullable=False
     )
     last_seen: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)

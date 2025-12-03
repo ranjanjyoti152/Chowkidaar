@@ -3,7 +3,7 @@ Chowkidaar NVR - User Schemas
 """
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from app.models.user import UserRole
 
 
@@ -15,7 +15,14 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     password: str = Field(..., min_length=8)
-    role: UserRole = UserRole.VIEWER
+    role: UserRole = UserRole.viewer
+    
+    @field_validator('role', mode='before')
+    @classmethod
+    def normalize_role(cls, v):
+        if isinstance(v, str):
+            return v.lower()
+        return v
 
 
 class UserUpdate(BaseModel):
@@ -24,6 +31,13 @@ class UserUpdate(BaseModel):
     full_name: Optional[str] = None
     role: Optional[UserRole] = None
     is_active: Optional[bool] = None
+    
+    @field_validator('role', mode='before')
+    @classmethod
+    def normalize_role(cls, v):
+        if isinstance(v, str):
+            return v.lower()
+        return v
 
 
 class UserPasswordUpdate(BaseModel):

@@ -8,11 +8,11 @@ import {
   PencilIcon,
   PlayIcon,
   StopIcon,
-  CheckIcon,
   XMarkIcon,
   SignalIcon,
 } from '@heroicons/react/24/outline'
 import { cameraApi } from '../services'
+import { useAuthStore } from '../store/authStore'
 import type { Camera, CameraCreate, CameraStatus } from '../types'
 import toast from 'react-hot-toast'
 
@@ -28,6 +28,7 @@ export default function Cameras() {
   const [showAddModal, setShowAddModal] = useState(false)
   const [editingCamera, setEditingCamera] = useState<Camera | null>(null)
   const queryClient = useQueryClient()
+  const { token } = useAuthStore()
 
   const { data: cameras, isLoading } = useQuery({
     queryKey: ['cameras'],
@@ -89,7 +90,7 @@ export default function Cameras() {
       <div className="page-header">
         <div>
           <h1 className="page-title">Cameras</h1>
-          <p className="text-gray-400 mt-1">Manage your RTSP camera sources</p>
+          <p className="text-gray-300 mt-1">Manage your RTSP camera sources</p>
         </div>
         <button
           onClick={() => setShowAddModal(true)}
@@ -124,7 +125,7 @@ export default function Cameras() {
               <div className="relative aspect-video bg-dark-400">
                 {camera.status === 'online' ? (
                   <img
-                    src={`/api/v1/cameras/${camera.id}/stream`}
+                    src={`${cameraApi.getStreamUrl(camera.id)}?token=${token}`}
                     alt={camera.name}
                     className="w-full h-full object-cover"
                   />
@@ -172,7 +173,7 @@ export default function Cameras() {
                 <div className="flex items-start justify-between">
                   <div>
                     <h3 className="text-lg font-semibold text-white">{camera.name}</h3>
-                    <p className="text-sm text-gray-400">{camera.location || 'No location'}</p>
+                    <p className="text-sm text-gray-300">{camera.location || 'No location'}</p>
                   </div>
                   <div className="flex gap-1">
                     <button
@@ -195,14 +196,14 @@ export default function Cameras() {
                 </div>
 
                 {/* Stats */}
-                <div className="mt-4 pt-4 border-t border-white/10 flex items-center gap-4">
+                <div className="mt-4 pt-4 border-t border-white/15 flex items-center gap-4">
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-gray-500">Events Today</span>
-                    <span className="text-sm font-medium text-white">{camera.events_today}</span>
+                    <span className="text-xs text-gray-400">Events Today</span>
+                    <span className="text-sm font-semibold text-white">{camera.events_today}</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-gray-500">FPS</span>
-                    <span className="text-sm font-medium text-white">{camera.fps}</span>
+                    <span className="text-xs text-gray-400">FPS</span>
+                    <span className="text-sm font-semibold text-white">{camera.fps}</span>
                   </div>
                   {camera.detection_enabled && (
                     <span className="badge-primary text-xs">Detection ON</span>

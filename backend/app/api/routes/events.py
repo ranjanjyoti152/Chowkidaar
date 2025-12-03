@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from app.core.database import get_db
+from app.core.config import settings
 from app.models.user import User
 from app.models.camera import Camera
 from app.models.event import Event, EventType, EventSeverity
@@ -271,14 +272,31 @@ async def get_event_frame(
             detail="Event frame not found"
         )
     
-    path = Path(event.frame_path)
-    if not path.exists():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Frame file not found"
-        )
+    # Get frame path from database
+    frame_path = event.frame_path
+    path = Path(frame_path)
     
-    return FileResponse(path, media_type="image/jpeg")
+    # If absolute path exists, use it directly
+    if path.is_absolute() and path.exists():
+        return FileResponse(path, media_type="image/jpeg")
+    
+    # Extract filename
+    filename = Path(frame_path).name
+    
+    # Try storage path from config
+    config_path = Path(settings.frames_storage_path) / filename
+    if config_path.exists():
+        return FileResponse(config_path, media_type="image/jpeg")
+    
+    # Try base path + storage
+    base_storage = Path(settings.base_path) / "storage" / "frames" / filename
+    if base_storage.exists():
+        return FileResponse(base_storage, media_type="image/jpeg")
+    
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail=f"Frame file not found: {filename}"
+    )
 
 
 @router.get("/{event_id}/thumbnail")
@@ -301,14 +319,31 @@ async def get_event_thumbnail(
             detail="Event thumbnail not found"
         )
     
-    path = Path(event.thumbnail_path)
-    if not path.exists():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Thumbnail file not found"
-        )
+    # Get thumbnail path
+    thumb_path = event.thumbnail_path
+    path = Path(thumb_path)
     
-    return FileResponse(path, media_type="image/jpeg")
+    # If absolute path exists, use it directly
+    if path.is_absolute() and path.exists():
+        return FileResponse(path, media_type="image/jpeg")
+    
+    # Extract filename
+    filename = Path(thumb_path).name
+    
+    # Try storage path from config
+    config_path = Path(settings.frames_storage_path) / filename
+    if config_path.exists():
+        return FileResponse(config_path, media_type="image/jpeg")
+    
+    # Try base path + storage
+    base_storage = Path(settings.base_path) / "storage" / "frames" / filename
+    if base_storage.exists():
+        return FileResponse(base_storage, media_type="image/jpeg")
+    
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail=f"Thumbnail file not found: {filename}"
+    )
 
 
 @router.post("/{event_id}/regenerate-summary", response_model=EventResponse)

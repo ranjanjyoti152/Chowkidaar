@@ -217,14 +217,14 @@ class RTSPStreamHandler:
     def get_status(self) -> CameraStatus:
         """Get camera status based on stream state"""
         mapping = {
-            StreamState.IDLE: CameraStatus.OFFLINE,
-            StreamState.CONNECTING: CameraStatus.CONNECTING,
-            StreamState.CONNECTED: CameraStatus.ONLINE,
-            StreamState.RECONNECTING: CameraStatus.CONNECTING,
-            StreamState.ERROR: CameraStatus.ERROR,
-            StreamState.STOPPED: CameraStatus.DISABLED
+            StreamState.IDLE: CameraStatus.offline,
+            StreamState.CONNECTING: CameraStatus.connecting,
+            StreamState.CONNECTED: CameraStatus.online,
+            StreamState.RECONNECTING: CameraStatus.connecting,
+            StreamState.ERROR: CameraStatus.error,
+            StreamState.STOPPED: CameraStatus.disabled
         }
-        return mapping.get(self._state, CameraStatus.OFFLINE)
+        return mapping.get(self._state, CameraStatus.offline)
     
     def is_connected(self) -> bool:
         return self._state == StreamState.CONNECTED

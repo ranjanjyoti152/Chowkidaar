@@ -116,10 +116,7 @@ export interface Event {
   event_type: EventType
   severity: EventSeverity
   camera_id: number
-  detected_objects: {
-    objects: DetectedObject[]
-    count: number
-  }
+  detected_objects: Array<Record<string, unknown>>
   confidence_score: number
   frame_path?: string
   thumbnail_path?: string
@@ -157,7 +154,7 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
   content: string
   event_id?: number
-  metadata?: Record<string, unknown>
+  message_metadata?: Record<string, unknown>
   created_at: string
 }
 
@@ -178,10 +175,23 @@ export interface ChatRequest {
   event_ids?: number[]
 }
 
+export interface RelatedEventInfo {
+  id: number
+  event_type: string
+  severity: string
+  timestamp: string
+  summary?: string
+  frame_path?: string
+  thumbnail_path?: string
+  camera_name?: string
+  detected_objects: Array<Record<string, unknown>>
+}
+
 export interface ChatResponse {
-  response: string
+  message: string
   session_id: number
   related_events?: number[]
+  events_with_images?: RelatedEventInfo[]
   metadata?: Record<string, unknown>
 }
 

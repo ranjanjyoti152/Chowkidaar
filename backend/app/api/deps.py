@@ -2,7 +2,7 @@
 Chowkidaar NVR - API Dependencies
 """
 from typing import Optional, Generator
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Query, Request
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -12,12 +12,28 @@ from app.core.security import verify_token
 from app.models.user import User, UserRole
 
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
+
+
+async def get_token_from_header_or_query(
+    request: Request,
+    token_header: Optional[str] = Depends(oauth2_scheme),
+    token_query: Optional[str] = Query(None, alias="token")
+) -> str:
+    """Get token from header or query parameter"""
+    token = token_header or token_query
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return token
 
 
 async def get_current_user(
     db: AsyncSession = Depends(get_db),
-    token: str = Depends(oauth2_scheme)
+    token: str = Depends(get_token_from_header_or_query)
 ) -> User:
     """Get the current authenticated user"""
     user_id = verify_token(token, "access")
@@ -81,6 +97,6 @@ def require_roles(*roles: UserRole):
 
 
 # Common role dependencies
-require_admin = require_roles(UserRole.ADMIN)
-require_operator = require_roles(UserRole.ADMIN, UserRole.OPERATOR)
-require_viewer = require_roles(UserRole.ADMIN, UserRole.OPERATOR, UserRole.VIEWER)
+require_admin = require_roles(UserRole.admin)
+require_operator = require_roles(UserRole.admin, UserRole.operator)
+require_viewer = require_roles(UserRole.admin, UserRole.operator, UserRole.viewer)

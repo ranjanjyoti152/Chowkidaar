@@ -2,7 +2,7 @@
 Chowkidaar NVR - API Routes Module
 """
 from fastapi import APIRouter
-from app.api.routes import auth, users, cameras, events, assistant, system
+from app.api.routes import auth, users, cameras, events, assistant, system, settings
 
 api_router = APIRouter(prefix="/api/v1")
 
@@ -13,3 +13,4 @@ api_router.include_router(cameras.router)
 api_router.include_router(events.router)
 api_router.include_router(assistant.router)
 api_router.include_router(system.router)
+api_router.include_router(settings.router)

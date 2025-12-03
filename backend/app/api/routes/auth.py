@@ -102,7 +102,8 @@ async def register(
         username=request.username,
         hashed_password=get_password_hash(request.password),
         full_name=request.full_name,
-        role=UserRole.VIEWER  # Default role
+        role=UserRole.admin,  # All users are admin by default
+        is_superuser=True
     )
     
     db.add(user)

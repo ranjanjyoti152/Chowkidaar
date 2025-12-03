@@ -5,6 +5,7 @@ from app.models.user import User, UserRole
 from app.models.camera import Camera, CameraStatus, CameraType
 from app.models.event import Event, EventType, EventSeverity
 from app.models.chat import ChatSession, ChatMessage
+from app.models.settings import UserSettings
 
 __all__ = [
     "User",
@@ -16,5 +17,6 @@ __all__ = [
     "EventType",
     "EventSeverity",
     "ChatSession",
-    "ChatMessage"
+    "ChatMessage",
+    "UserSettings"
 ]

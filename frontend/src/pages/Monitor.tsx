@@ -263,13 +263,13 @@ export default function Monitor() {
               </div>
             </div>
             <div className="space-y-2">
-              {streams?.streams?.map((stream: Record<string, unknown>, i: number) => (
+              {(streams?.streams as Array<{camera_id: number; state: string}>)?.map((stream, i) => (
                 <div key={i} className="flex items-center justify-between text-sm">
-                  <span className="text-gray-400">Camera {stream.camera_id as number}</span>
+                  <span className="text-gray-400">Camera {stream.camera_id}</span>
                   <span className={`${
                     stream.state === 'connected' ? 'text-green-400' : 'text-yellow-400'
                   }`}>
-                    {stream.state as string}
+                    {stream.state}
                   </span>
                 </div>
               ))}
