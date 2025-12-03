@@ -73,7 +73,7 @@ export default function Settings() {
   const [modelClasses, setModelClasses] = useState<string[]>(detectionClasses)
   const [isLoadingClasses, setIsLoadingClasses] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
-  const [activeYoloModel, setActiveYoloModel] = useState<string>('yolov8n')
+  const [activeYoloModel, setActiveYoloModel] = useState<string>('')
   const fileInputRef = useRef<HTMLInputElement>(null)
   const queryClient = useQueryClient()
 
@@ -103,19 +103,28 @@ export default function Settings() {
     setIsLoadingModels(false)
   }
 
-  // Initial fetch
-  useEffect(() => {
-    fetchOllamaModels(settings.vlm.ollama_url)
-  }, [])
-
   const { isLoading } = useQuery({
     queryKey: ['settings'],
     queryFn: async () => {
       try {
         const data = await settingsApi.get()
         setSettings(data)
+        // Set active model from loaded settings
+        if (data.detection?.model) {
+          setActiveYoloModel(data.detection.model)
+        }
+        // Fetch classes for the saved model
+        if (data.detection?.model) {
+          fetchModelClasses(data.detection.model)
+        }
+        // Fetch Ollama models with saved URL
+        if (data.vlm?.ollama_url) {
+          fetchOllamaModels(data.vlm.ollama_url)
+        }
         return data
       } catch {
+        // Only use defaults if fetch fails
+        fetchOllamaModels(defaultSettings.vlm.ollama_url)
         return defaultSettings
       }
     },
@@ -246,10 +255,9 @@ export default function Settings() {
     }
   }
 
-  // Initial fetch
+  // Initial fetch - only fetch YOLO models list, settings will load classes
   useEffect(() => {
     fetchYoloModels()
-    fetchModelClasses(settings.detection.model)
   }, [])
 
   if (isLoading) {

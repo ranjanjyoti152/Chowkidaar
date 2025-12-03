@@ -120,11 +120,16 @@ async def chat_with_assistant(
             for msg in messages
         ]
     
+    # Check if user is asking about images
+    image_keywords = ['image', 'photo', 'picture', 'show', 'dikhao', 'dikha', 'frame', 'snapshot', 'footage', 'recording', 'see', 'dekho', 'dekh']
+    asking_for_images = any(kw in request.message.lower() for kw in image_keywords)
+    
     # Get response from VLM
     response = await vlm_service.chat(
         message=request.message,
         context=context if context else None,
-        history=history if history else None
+        history=history if history else None,
+        has_images=bool(events_with_images) or asking_for_images
     )
     
     # Save user message
@@ -309,7 +314,8 @@ async def query_events(
     # Analyze events with VLM
     response = await vlm_service.analyze_events(
         events_summary=events_text,
-        query=query.query
+        query=query.query,
+        has_images=bool(events_with_images)
     )
     
     return ChatResponse(

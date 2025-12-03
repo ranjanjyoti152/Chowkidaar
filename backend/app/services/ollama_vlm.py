@@ -24,6 +24,20 @@ class OllamaVLMService:
         self.chat_model = settings.ollama_chat_model
         self._client: Optional[httpx.AsyncClient] = None
     
+    def configure(self, base_url: str, vlm_model: str, chat_model: str = None):
+        """Configure Ollama with custom settings"""
+        if base_url and base_url != self.base_url:
+            self.base_url = base_url
+            # Close existing client to use new URL
+            if self._client and not self._client.is_closed:
+                asyncio.create_task(self._client.aclose())
+            self._client = None
+        if vlm_model:
+            self.vlm_model = vlm_model
+        if chat_model:
+            self.chat_model = chat_model
+        logger.debug(f"Ollama configured: {self.base_url}, model: {self.vlm_model}")
+    
     async def _get_client(self) -> httpx.AsyncClient:
         """Get or create HTTP client"""
         if self._client is None or self._client.is_closed:
@@ -170,7 +184,8 @@ Be specific and factual. Keep under 150 words."""
         self,
         message: str,
         context: Optional[str] = None,
-        history: Optional[List[Dict[str, str]]] = None
+        history: Optional[List[Dict[str, str]]] = None,
+        has_images: bool = False
     ) -> str:
         """
         Chat with the assistant model
@@ -179,6 +194,7 @@ Be specific and factual. Keep under 150 words."""
             message: User message
             context: Additional context (e.g., event summaries)
             history: Chat history
+            has_images: Whether images will be shown to user
         
         Returns:
             Assistant response
@@ -192,10 +208,18 @@ Be specific and factual. Keep under 150 words."""
             # System message
             system_prompt = """You are Chowkidaar AI, an intelligent security assistant for a surveillance system.
 You have access to event summaries and can help users understand security events, analyze patterns, and answer questions about their camera footage.
-Be helpful, concise, and focus on security-related insights."""
+
+IMPORTANT: When users ask about images, events, or what happened - the system WILL display relevant event images alongside your response. So do NOT say you cannot show images. Instead, describe what happened based on the event summaries and tell the user they can see the images below.
+
+Be helpful, concise, and focus on security-related insights.
+Do not use markdown formatting like ** or * for emphasis.
+Speak naturally and directly."""
             
             if context:
                 system_prompt += f"\n\nContext from recent events:\n{context}"
+            
+            if has_images:
+                system_prompt += "\n\nNote: Event images will be displayed to the user along with your response. Refer to them naturally."
             
             messages.append({"role": "system", "content": system_prompt})
             
@@ -234,17 +258,24 @@ Be helpful, concise, and focus on security-related insights."""
     async def analyze_events(
         self,
         events_summary: str,
-        query: str
+        query: str,
+        has_images: bool = False
     ) -> str:
         """Analyze multiple events and answer questions"""
+        
+        image_note = ""
+        if has_images:
+            image_note = "\n\nNote: The relevant event images will be shown to the user alongside your response. Reference them naturally."
         
         prompt = f"""Based on the following security events:
 
 {events_summary}
 
-User Question: {query}
+User Question: {query}{image_note}
 
-Provide a helpful and accurate response based on the events data."""
+Provide a helpful and accurate response based on the events data.
+Do not use markdown formatting like ** or * for emphasis.
+Do NOT say you cannot display images - images ARE being shown to the user."""
         
         return await self.chat(prompt)
     

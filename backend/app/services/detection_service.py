@@ -3,7 +3,7 @@ Chowkidaar NVR - Background Detection Service
 Handles automatic event creation from detections
 """
 import asyncio
-from typing import Dict, Optional, List, Set
+from typing import Dict, Optional, List, Set, Any
 from datetime import datetime, timedelta
 from loguru import logger
 import cv2
@@ -18,6 +18,7 @@ from app.services.stream_handler import get_stream_manager
 from app.services.ollama_vlm import get_vlm_service
 from app.models.event import Event, EventType, EventSeverity
 from app.models.camera import Camera
+from app.models.settings import UserSettings
 
 
 class DetectionService:
@@ -99,12 +100,38 @@ class DetectionService:
     
     async def _detection_loop(self, camera_id: int, user_id: int):
         """Main detection loop for a camera"""
-        detector = await get_detector()
         stream_manager = get_stream_manager()
+        
+        # Get user's detection settings
+        user_settings = await self._get_user_settings(user_id)
+        model_name = user_settings.get("model", "yolov8n") if user_settings else "yolov8n"
+        device = user_settings.get("device", "cuda") if user_settings else "cuda"
+        confidence = user_settings.get("confidence", 0.5) if user_settings else 0.5
+        
+        # Initialize detector with user's model
+        detector = await get_detector()
+        await detector.load_model(model_name, device)
+        detector.confidence_threshold = confidence
+        
+        # Configure Ollama VLM with user's settings
+        vlm_settings = await self._get_vlm_settings(user_id)
+        if vlm_settings:
+            vlm = await get_vlm_service()
+            vlm.configure(
+                base_url=vlm_settings.get("url", "http://localhost:11434"),
+                vlm_model=vlm_settings.get("model", "llava"),
+                chat_model=vlm_settings.get("model", "llava")
+            )
+            logger.info(f"VLM configured: {vlm_settings.get('url')} with model {vlm_settings.get('model')}")
+        
+        logger.info(f"🔍 Started detection loop for camera {camera_id} with model {model_name} on {device}")
         
         frame_count = 0
         null_frame_count = 0
-        logger.info(f"🔍 Started detection loop for camera {camera_id}")
+        
+        # Fetch user's enabled detection classes
+        enabled_classes = await self._get_enabled_classes(user_id)
+        logger.info(f"Camera {camera_id}: Enabled classes for user {user_id}: {enabled_classes}")
         
         while self._running:
             try:
@@ -130,6 +157,14 @@ class DetectionService:
                     await asyncio.sleep(0.033)  # ~30fps
                     continue
                 
+                # Refresh enabled classes periodically (every 100 detection frames)
+                if frame_count % 3000 == 0:
+                    enabled_classes = await self._get_enabled_classes(user_id)
+                    logger.debug(f"Camera {camera_id}: Refreshed enabled classes: {enabled_classes}")
+                
+                # Always fetch enabled classes to ensure latest settings (cached every few seconds)
+                enabled_classes = await self._get_enabled_classes(user_id)
+                
                 logger.info(f"🔎 Camera {camera_id}: Running detection on frame {frame_count}")
                 
                 # Run detection
@@ -147,6 +182,14 @@ class DetectionService:
                     logger.debug(f"Camera {camera_id}: No significant detections (confidence > 0.5)")
                     continue
                 
+                # Filter by enabled classes
+                if enabled_classes:
+                    filtered = [d for d in significant if d["class_name"].lower() in enabled_classes]
+                    if not filtered:
+                        logger.debug(f"Camera {camera_id}: No detections matching enabled classes. Detected: {[d['class_name'] for d in significant]}")
+                        continue
+                    significant = filtered
+                
                 logger.info(f"📸 Camera {camera_id}: {len(significant)} significant detections: {[d['class_name'] for d in significant]}")
                 
                 # Check cooldown and create events
@@ -161,6 +204,70 @@ class DetectionService:
                 await asyncio.sleep(1)
         
         logger.info(f"Stopped detection loop for camera {camera_id}")
+    
+    async def _get_enabled_classes(self, user_id: int) -> Set[str]:
+        """Get user's enabled detection classes from settings"""
+        try:
+            async with AsyncSessionLocal() as db:
+                from sqlalchemy import select
+                result = await db.execute(
+                    select(UserSettings).where(UserSettings.user_id == user_id)
+                )
+                user_settings = result.scalar_one_or_none()
+                
+                if user_settings and user_settings.enabled_classes:
+                    # Convert to lowercase set for comparison
+                    return set(c.lower() for c in user_settings.enabled_classes)
+                
+                # Default: all COCO classes if no settings
+                return set()
+        except Exception as e:
+            logger.error(f"Failed to get enabled classes for user {user_id}: {e}")
+            return set()
+    
+    async def _get_user_settings(self, user_id: int) -> Optional[Dict[str, Any]]:
+        """Get user's detection settings from database"""
+        try:
+            async with AsyncSessionLocal() as db:
+                from sqlalchemy import select
+                result = await db.execute(
+                    select(UserSettings).where(UserSettings.user_id == user_id)
+                )
+                user_settings = result.scalar_one_or_none()
+                
+                if user_settings:
+                    return {
+                        "model": user_settings.detection_model,
+                        "device": user_settings.detection_device,
+                        "confidence": user_settings.detection_confidence,
+                        "enabled_classes": user_settings.enabled_classes or []
+                    }
+                return None
+        except Exception as e:
+            logger.error(f"Failed to get user settings for user {user_id}: {e}")
+            return None
+    
+    async def _get_vlm_settings(self, user_id: int) -> Optional[Dict[str, Any]]:
+        """Get user's VLM settings from database"""
+        try:
+            async with AsyncSessionLocal() as db:
+                from sqlalchemy import select
+                result = await db.execute(
+                    select(UserSettings).where(UserSettings.user_id == user_id)
+                )
+                user_settings = result.scalar_one_or_none()
+                
+                if user_settings:
+                    return {
+                        "url": user_settings.vlm_url,
+                        "model": user_settings.vlm_model,
+                        "auto_summarize": user_settings.auto_summarize,
+                        "summarize_delay": user_settings.summarize_delay
+                    }
+                return None
+        except Exception as e:
+            logger.error(f"Failed to get VLM settings for user {user_id}: {e}")
+            return None
     
     async def _process_detections(
         self, 
@@ -264,23 +371,79 @@ class DetectionService:
         frame: np.ndarray,
         detections: List[dict]
     ):
-        """Generate VLM summary for event"""
+        """Generate VLM summary and intelligent severity assessment for event"""
         try:
             vlm = await get_vlm_service()
             
             # Create clean prompt for accurate, concise summary
             objects = ", ".join(set(d["class_name"] for d in detections))
-            prompt = f"""Analyze this security camera image. Detected: {objects}.
+            current_time = datetime.utcnow()
+            hour = current_time.hour
+            time_context = "night time" if (hour >= 22 or hour < 6) else "day time" if (6 <= hour < 18) else "evening"
+            
+            # Combined prompt for summary AND severity analysis
+            prompt = f"""You are an AI security analyst for a surveillance system.
 
-Provide a brief 2-3 sentence factual description of what you see. 
-Do NOT use markdown, bullet points, or formatting.
-Do NOT add notes, disclaimers, or suggestions.
-Just describe the scene simply and directly."""
+DETECTED OBJECTS: {objects}
+TIME: {time_context} ({current_time.strftime('%H:%M')})
+NUMBER OF DETECTIONS: {len(detections)}
+
+Analyze this security camera image and provide:
+
+1. SUMMARY: A brief 2-3 sentence factual description of what you see.
+
+2. THREAT_LEVEL: Assess the security threat level as one of: low, medium, high, critical
+
+Consider these threat scenarios:
+- CRITICAL: Fire, smoke, weapons, violent behavior, child in danger, kidnapping, theft in progress, break-in
+- HIGH: Suspicious behavior at night, unknown person near doors/windows, someone running away, loitering, multiple unknown people
+- MEDIUM: Unknown person during day, vehicle in unusual location, animals that could be dangerous
+- LOW: Normal activity, known safe scenarios, pets, regular vehicle movement
+
+3. THREAT_REASON: One sentence explaining why this threat level.
+
+Format your response EXACTLY like this:
+SUMMARY: [your summary here]
+THREAT_LEVEL: [low/medium/high/critical]
+THREAT_REASON: [reason here]
+
+Do NOT use markdown. Be direct and factual."""
             
-            # Generate summary using describe_frame
-            summary = await vlm.describe_frame(frame, detections, prompt)
+            # Generate analysis using describe_frame
+            response = await vlm.describe_frame(frame, detections, prompt)
             
-            if summary:
+            if response:
+                # Parse the response
+                summary = ""
+                threat_level = "low"
+                threat_reason = ""
+                
+                lines = response.strip().split('\n')
+                for line in lines:
+                    line = line.strip()
+                    if line.upper().startswith('SUMMARY:'):
+                        summary = line[8:].strip()
+                    elif line.upper().startswith('THREAT_LEVEL:'):
+                        level = line[13:].strip().lower()
+                        if level in ['low', 'medium', 'high', 'critical']:
+                            threat_level = level
+                    elif line.upper().startswith('THREAT_REASON:'):
+                        threat_reason = line[14:].strip()
+                
+                # If parsing failed, use full response as summary
+                if not summary:
+                    summary = response.replace('**', '').replace('*', '').strip()
+                
+                # Map threat level to severity enum
+                severity_map = {
+                    'low': EventSeverity.low,
+                    'medium': EventSeverity.medium,
+                    'high': EventSeverity.high,
+                    'critical': EventSeverity.critical
+                }
+                new_severity = severity_map.get(threat_level, EventSeverity.low)
+                
+                # Update event with AI-analyzed summary and severity
                 async with AsyncSessionLocal() as db:
                     from sqlalchemy import update
                     await db.execute(
@@ -288,11 +451,22 @@ Just describe the scene simply and directly."""
                         .where(Event.id == event_id)
                         .values(
                             summary=summary,
+                            severity=new_severity,
+                            detection_metadata={
+                                "ai_threat_level": threat_level,
+                                "ai_threat_reason": threat_reason,
+                                "time_context": time_context,
+                                "analyzed_at": datetime.utcnow().isoformat()
+                            },
                             summary_generated_at=datetime.utcnow()
                         )
                     )
                     await db.commit()
-                    logger.info(f"✨ Generated summary for event {event_id}")
+                    
+                    if threat_level in ['high', 'critical']:
+                        logger.warning(f"🚨 HIGH THREAT Event {event_id}: {threat_level.upper()} - {threat_reason}")
+                    else:
+                        logger.info(f"✨ Event {event_id} analyzed: {threat_level} severity - {summary[:50]}...")
                     
         except Exception as e:
             logger.error(f"Failed to generate summary: {e}")
@@ -315,14 +489,24 @@ Just describe the scene simply and directly."""
         return EventType.motion_detected
     
     def _get_severity(self, detections: List[dict]) -> EventSeverity:
-        """Determine severity from detections"""
+        """Initial severity from detections (will be refined by AI analysis)"""
         classes = [d["class_name"].lower() for d in detections]
         
-        if "fire" in classes:
+        # Basic initial severity - AI will analyze and update
+        if "fire" in classes or "knife" in classes or "gun" in classes:
             return EventSeverity.critical
         if "smoke" in classes:
             return EventSeverity.high
+        
+        # Check time - night detections are more serious
+        hour = datetime.utcnow().hour
+        is_night = hour >= 22 or hour < 6
+        
         if "person" in classes:
+            # Multiple people or night time = higher initial severity
+            person_count = sum(1 for d in detections if d["class_name"].lower() == "person")
+            if is_night or person_count > 1:
+                return EventSeverity.high
             return EventSeverity.medium
         
         return EventSeverity.low

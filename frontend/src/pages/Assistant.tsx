@@ -11,11 +11,26 @@ import {
   PlusIcon,
   ClockIcon,
   PhotoIcon,
+  UserIcon,
 } from '@heroicons/react/24/outline'
 import { assistantApi } from '../services'
 import { useAuthStore } from '../store/authStore'
 import type { ChatSession, ChatMessage, RelatedEventInfo } from '../types'
 import toast from 'react-hot-toast'
+
+// Clean markdown and extra LLM formatting from response
+const cleanResponse = (text: string): string => {
+  if (!text) return ''
+  return text
+    .replace(/\*\*/g, '')  // Remove bold markdown
+    .replace(/\*/g, '')    // Remove italic markdown
+    .replace(/^#+\s*/gm, '') // Remove headers
+    .replace(/^[-•]\s*/gm, '• ') // Normalize bullet points
+    .replace(/^\d+\.\s*/gm, (match) => match) // Keep numbered lists
+    .replace(/\n{3,}/g, '\n\n') // Reduce multiple newlines
+    .replace(/`([^`]+)`/g, '$1') // Remove code backticks
+    .trim()
+}
 
 // Extended message type to include events with images
 interface ExtendedChatMessage extends ChatMessage {
@@ -243,23 +258,32 @@ export default function Assistant() {
                       key={message.id}
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
-                      className={`flex gap-3 ${
+                      className={`flex gap-4 ${
                         message.role === 'user' ? 'flex-row-reverse' : 'flex-row'
                       }`}
                     >
-                      {message.role === 'assistant' && (
-                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-300 to-primary-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-primary-500/30">
+                      {/* Avatar */}
+                      {message.role === 'assistant' ? (
+                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center flex-shrink-0 shadow-lg shadow-primary-500/40">
                           <SparklesIcon className="w-5 h-5 text-white" />
                         </div>
+                      ) : (
+                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-400 to-blue-600 flex items-center justify-center flex-shrink-0 shadow-lg shadow-blue-500/40">
+                          <UserIcon className="w-5 h-5 text-white" />
+                        </div>
                       )}
+                      
+                      {/* Message Bubble */}
                       <div
                         className={`max-w-[75%] ${
                           message.role === 'user'
-                            ? 'bg-primary-500 text-white rounded-2xl rounded-tr-md px-5 py-3 shadow-lg shadow-primary-500/30'
-                            : 'bg-dark-400/90 text-gray-100 rounded-2xl rounded-tl-md border border-white/15 px-5 py-3'
+                            ? 'bg-gradient-to-br from-cyan-500 to-blue-600 text-white rounded-2xl rounded-tr-sm px-5 py-3 shadow-lg shadow-blue-500/30'
+                            : 'bg-dark-400/90 text-gray-100 rounded-2xl rounded-tl-sm border border-white/15 px-5 py-3'
                         }`}
                       >
-                        <p className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</p>
+                        <p className="whitespace-pre-wrap text-sm leading-relaxed">
+                          {message.role === 'assistant' ? cleanResponse(message.content) : message.content}
+                        </p>
                         
                         {/* Display related event images */}
                         {message.role === 'assistant' && message.events_with_images && message.events_with_images.length > 0 && (
@@ -312,18 +336,13 @@ export default function Assistant() {
                         <p
                           className={`text-xs mt-2 ${
                             message.role === 'user'
-                              ? 'text-primary-200'
+                              ? 'text-cyan-200'
                               : 'text-gray-500'
                           }`}
                         >
                           {format(new Date(message.created_at), 'HH:mm')}
                         </p>
                       </div>
-                      {message.role === 'user' && (
-                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-300 to-blue-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-blue-500/30">
-                          <span className="text-sm text-white font-bold">R</span>
-                        </div>
-                      )}
                     </motion.div>
                   ))}
                 </AnimatePresence>

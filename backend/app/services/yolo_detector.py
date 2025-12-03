@@ -44,19 +44,77 @@ class YOLODetector:
     def __init__(self):
         self.model: Optional[YOLO] = None
         self.model_path = settings.yolo_model_path
+        self.model_name = "yolov8n"
         self.confidence_threshold = settings.yolo_confidence_threshold
         self.target_classes = settings.yolo_classes_list
+        self.device = "cuda"  # Default to GPU
         self.inference_stats = {
             "count": 0,
             "total_time": 0.0,
             "last_time": 0.0
         }
         self._initialized = False
+        self._current_model_name = None
     
-    async def initialize(self) -> bool:
+    async def load_model(self, model_name: str, device: str = "cuda") -> bool:
+        """Load a specific YOLO model by name"""
+        # Skip if same model already loaded
+        if self._initialized and self._current_model_name == model_name and self.device == device:
+            logger.debug(f"Model {model_name} already loaded on {device}")
+            return True
+        
+        try:
+            self.device = device
+            self.model_name = model_name
+            
+            # Build model path
+            model_path = Path(settings.base_path) / f"{model_name}.pt"
+            if not model_path.exists():
+                # Try without base path
+                model_path = Path(f"{model_name}.pt")
+            
+            if not model_path.exists():
+                logger.error(f"Model file not found: {model_path}")
+                return False
+            
+            self.model_path = str(model_path)
+            logger.info(f"🔄 Loading YOLO model: {model_name} from {model_path} on {device}")
+            
+            # Load model in a thread pool
+            loop = asyncio.get_event_loop()
+            self.model = await loop.run_in_executor(
+                None,
+                lambda: YOLO(str(model_path))
+            )
+            
+            # Move to device
+            if device == "cuda":
+                import torch
+                if torch.cuda.is_available():
+                    self.model.to("cuda")
+                    logger.info(f"✅ YOLO model {model_name} loaded on GPU: {torch.cuda.get_device_name(0)}")
+                else:
+                    self.device = "cpu"
+                    logger.warning("⚠️ CUDA not available, using CPU")
+            else:
+                self.model.to("cpu")
+                logger.info(f"✅ YOLO model {model_name} loaded on CPU")
+            
+            self._initialized = True
+            self._current_model_name = model_name
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to load model {model_name}: {e}")
+            return False
+    
+    async def initialize(self, device: Optional[str] = None) -> bool:
         """Initialize the YOLO model"""
         try:
-            logger.info(f"Loading YOLO model: {self.model_path}")
+            if device:
+                self.device = device
+            
+            logger.info(f"Loading YOLO model: {self.model_path} on device: {self.device}")
             
             # Load model in a thread pool to avoid blocking
             loop = asyncio.get_event_loop()
@@ -65,8 +123,20 @@ class YOLODetector:
                 lambda: YOLO(self.model_path)
             )
             
+            # Move model to specified device
+            if self.device == "cuda":
+                import torch
+                if torch.cuda.is_available():
+                    self.model.to("cuda")
+                    logger.info(f"✅ YOLO model loaded on GPU: {torch.cuda.get_device_name(0)}")
+                else:
+                    self.device = "cpu"
+                    logger.warning("⚠️ CUDA not available, falling back to CPU")
+            else:
+                self.model.to("cpu")
+                logger.info("YOLO model loaded on CPU")
+            
             self._initialized = True
-            logger.info("YOLO model loaded successfully")
             return True
             
         except Exception as e:
@@ -92,11 +162,11 @@ class YOLODetector:
         start_time = datetime.utcnow()
         
         try:
-            # Run inference in thread pool
+            # Run inference in thread pool with device specified
             loop = asyncio.get_event_loop()
             results = await loop.run_in_executor(
                 None,
-                lambda: self.model(frame, conf=conf_threshold, verbose=False)
+                lambda: self.model(frame, conf=conf_threshold, device=self.device, verbose=False)
             )
             
             # Calculate inference time
@@ -163,8 +233,25 @@ class YOLODetector:
             self.inference_stats["total_time"] / count
             if count > 0 else 0
         )
+        
+        # Get GPU info if using CUDA
+        gpu_info = None
+        if self.device == "cuda":
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    gpu_info = {
+                        "name": torch.cuda.get_device_name(0),
+                        "memory_allocated": f"{torch.cuda.memory_allocated(0) / 1024**2:.1f} MB",
+                        "memory_reserved": f"{torch.cuda.memory_reserved(0) / 1024**2:.1f} MB"
+                    }
+            except:
+                pass
+        
         return {
             "model_name": self.model_path,
+            "device": self.device,
+            "gpu_info": gpu_info,
             "inference_count": count,
             "average_inference_time_ms": avg_time,
             "last_inference_time_ms": self.inference_stats["last_time"],
