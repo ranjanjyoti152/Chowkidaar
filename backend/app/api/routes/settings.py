@@ -61,7 +61,7 @@ async def get_settings(
         notifications=NotificationSettings(
             enabled=settings.notifications_enabled,
             min_severity=settings.min_severity,
-            event_types=settings.notify_event_types or ["intrusion", "theft_attempt", "suspicious", "fire_detected", "smoke_detected"],
+            event_types=settings.notify_event_types or ["all"],
             telegram=TelegramSettings(
                 enabled=settings.telegram_enabled,
                 bot_token=settings.telegram_bot_token,
@@ -178,7 +178,7 @@ async def update_settings(
         notifications=NotificationSettings(
             enabled=settings.notifications_enabled,
             min_severity=settings.min_severity,
-            event_types=settings.notify_event_types or ["intrusion", "theft_attempt", "suspicious", "fire_detected", "smoke_detected"],
+            event_types=settings.notify_event_types or ["all"],
             telegram=TelegramSettings(
                 enabled=settings.telegram_enabled,
                 bot_token=settings.telegram_bot_token,

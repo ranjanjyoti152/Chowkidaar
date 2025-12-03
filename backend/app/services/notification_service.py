@@ -59,7 +59,8 @@ class NotificationService:
             
             # Check event type filter
             notify_types = settings.notify_event_types or []
-            if notify_types and event.event_type.value not in notify_types:
+            # "all" means notify for all event types
+            if notify_types and "all" not in notify_types and event.event_type.value not in notify_types:
                 logger.debug(f"Event type {event.event_type.value} not in notification list")
                 return
             

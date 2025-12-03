@@ -52,7 +52,7 @@ class EmailSettings(BaseModel):
 class NotificationSettings(BaseModel):
     enabled: bool = True
     min_severity: str = "high"
-    event_types: List[str] = ["intrusion", "theft_attempt", "suspicious", "fire_detected", "smoke_detected"]
+    event_types: List[str] = ["all"]
     telegram: TelegramSettings = TelegramSettings()
     email: EmailSettings = EmailSettings()
 

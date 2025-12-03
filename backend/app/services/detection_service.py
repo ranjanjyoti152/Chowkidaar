@@ -154,13 +154,8 @@ class DetectionService:
                 null_frame_count = 0
                 frame_count += 1
                 
-                # Run detection every 30th frame (roughly every 2 seconds at 15fps)
-                if frame_count % 30 != 0:
-                    await asyncio.sleep(0.033)  # ~30fps
-                    continue
-                
-                # Refresh enabled classes periodically (every 100 detection frames)
-                if frame_count % 3000 == 0:
+                # Refresh enabled classes periodically (every 100 frames)
+                if frame_count % 100 == 0:
                     enabled_classes = await self._get_enabled_classes(user_id)
                     logger.debug(f"Camera {camera_id}: Refreshed enabled classes: {enabled_classes}")
                 
@@ -376,7 +371,17 @@ class DetectionService:
     ):
         """Generate VLM summary, intelligent severity assessment, and send notification"""
         try:
+            # Get VLM settings and configure
+            vlm_settings = await self._get_vlm_settings(user_id)
             vlm = await get_vlm_service()
+            
+            if vlm_settings:
+                vlm.configure(
+                    base_url=vlm_settings.get("url", "http://localhost:11434"),
+                    vlm_model=vlm_settings.get("model", "gemma3:4b"),
+                    chat_model=vlm_settings.get("model", "gemma3:4b")
+                )
+                logger.debug(f"VLM configured for summary: {vlm_settings.get('url')} model: {vlm_settings.get('model')}")
             
             # Create clean prompt for accurate, concise summary
             objects = ", ".join(set(d["class_name"] for d in detections))

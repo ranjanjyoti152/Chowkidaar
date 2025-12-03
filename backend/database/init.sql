@@ -195,7 +195,7 @@ CREATE TABLE IF NOT EXISTS user_settings (
     -- Notification settings
     notifications_enabled BOOLEAN DEFAULT true,
     min_severity VARCHAR(20) DEFAULT 'high',
-    notify_event_types JSONB DEFAULT '["intrusion", "theft_attempt", "suspicious", "fire_detected", "smoke_detected"]',
+    notify_event_types JSONB DEFAULT '["all"]',
     
     -- Telegram settings
     telegram_enabled BOOLEAN DEFAULT false,

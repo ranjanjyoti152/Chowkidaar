@@ -33,16 +33,17 @@ type Settings = SettingsData
 
 // Event types for notification filtering
 const eventTypes = [
+  { id: 'all', label: 'All Events', color: 'primary' },
   { id: 'intrusion', label: 'Intrusion', color: 'red' },
   { id: 'theft_attempt', label: 'Theft Attempt', color: 'red' },
   { id: 'suspicious', label: 'Suspicious Activity', color: 'orange' },
   { id: 'fire_detected', label: 'Fire Detected', color: 'red' },
   { id: 'smoke_detected', label: 'Smoke Detected', color: 'orange' },
-  { id: 'person_detected', label: 'Person Detected', color: 'blue' },
   { id: 'delivery', label: 'Delivery', color: 'green' },
   { id: 'visitor', label: 'Visitor', color: 'green' },
   { id: 'package_left', label: 'Package Left', color: 'cyan' },
   { id: 'loitering', label: 'Loitering', color: 'yellow' },
+  { id: 'person_detected', label: 'Person Detected', color: 'blue' },
   { id: 'vehicle_detected', label: 'Vehicle Detected', color: 'blue' },
   { id: 'animal_detected', label: 'Animal Detected', color: 'purple' },
 ]
@@ -69,7 +70,7 @@ const defaultSettings: Settings = {
   notifications: {
     enabled: true,
     min_severity: 'high',
-    event_types: ['intrusion', 'theft_attempt', 'suspicious', 'fire_detected', 'smoke_detected'],
+    event_types: ['all'],
     telegram: {
       enabled: false,
       bot_token: '',
@@ -901,19 +902,21 @@ export default function Settings() {
                     </label>
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-gray-500">
-                        {settings.notifications.event_types?.length || 0}/{eventTypes.length} selected
+                        {(settings.notifications.event_types || []).includes('all') 
+                          ? 'All events' 
+                          : `${settings.notifications.event_types?.length || 0} selected`}
                       </span>
                       <button
                         onClick={() => setSettings({
                           ...settings,
                           notifications: { 
                             ...settings.notifications, 
-                            event_types: eventTypes.map(e => e.id) 
+                            event_types: ['all']
                           }
                         })}
                         className="text-xs text-primary-400 hover:text-primary-300"
                       >
-                        Select All
+                        All
                       </button>
                       <button
                         onClick={() => setSettings({
@@ -932,23 +935,42 @@ export default function Settings() {
                         key={event.id}
                         onClick={() => {
                           const current = settings.notifications.event_types || []
+                          let newTypes: string[]
+                          
+                          if (event.id === 'all') {
+                            // If clicking "All", set only "all"
+                            newTypes = current.includes('all') ? [] : ['all']
+                          } else {
+                            // If clicking specific event
+                            if (current.includes('all')) {
+                              // Remove "all" and add specific event
+                              newTypes = [event.id]
+                            } else if (current.includes(event.id)) {
+                              // Remove this event
+                              newTypes = current.filter((e) => e !== event.id)
+                            } else {
+                              // Add this event
+                              newTypes = [...current, event.id]
+                            }
+                          }
+                          
                           setSettings({
                             ...settings,
                             notifications: {
                               ...settings.notifications,
-                              event_types: current.includes(event.id)
-                                ? current.filter((e) => e !== event.id)
-                                : [...current, event.id],
+                              event_types: newTypes,
                             },
                           })
                         }}
                         className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
                           (settings.notifications.event_types || []).includes(event.id)
-                            ? `bg-${event.color}-500/20 text-${event.color}-400 border border-${event.color}-500/30`
+                            ? event.id === 'all'
+                              ? 'bg-primary-500/30 text-primary-300 border border-primary-500/50'
+                              : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                             : 'bg-white/5 text-gray-400 border border-white/10 hover:border-white/20'
                         }`}
                       >
-                        {event.label}
+                        {event.id === 'all' ? '🌐 ' : ''}{event.label}
                       </button>
                     ))}
                   </div>

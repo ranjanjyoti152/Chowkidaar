@@ -66,7 +66,7 @@ class UserSettings(Base):
     email_send_details: Mapped[bool] = mapped_column(default=True)
     
     # Event type filters for notifications
-    notify_event_types: Mapped[list] = mapped_column(JSON, default=lambda: ["intrusion", "theft_attempt", "suspicious", "fire_detected", "smoke_detected"])
+    notify_event_types: Mapped[list] = mapped_column(JSON, default=lambda: ["all"])
     
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(

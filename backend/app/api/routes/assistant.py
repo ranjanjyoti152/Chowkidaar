@@ -11,6 +11,7 @@ from app.core.database import get_db
 from app.models.user import User
 from app.models.event import Event
 from app.models.chat import ChatSession, ChatMessage
+from app.models.settings import UserSettings
 from app.schemas.chat import (
     ChatRequest, ChatResponse, ChatSessionCreate, ChatSessionResponse,
     ChatMessageResponse, AssistantQuery, RelatedEventInfo
@@ -22,6 +23,25 @@ from app.services.ollama_vlm import get_vlm_service
 router = APIRouter(prefix="/assistant", tags=["AI Assistant"])
 
 
+async def configure_vlm_from_settings(user_id: int, db: AsyncSession):
+    """Configure VLM service from user settings"""
+    result = await db.execute(
+        select(UserSettings).where(UserSettings.user_id == user_id)
+    )
+    settings = result.scalar_one_or_none()
+    
+    vlm_service = await get_vlm_service()
+    
+    if settings:
+        vlm_service.configure(
+            base_url=settings.vlm_url or "http://localhost:11434",
+            vlm_model=settings.vlm_model or "gemma3:4b",
+            chat_model=settings.vlm_model or "gemma3:4b"
+        )
+    
+    return vlm_service
+
+
 @router.post("/chat", response_model=ChatResponse)
 async def chat_with_assistant(
     request: ChatRequest,
@@ -29,7 +49,8 @@ async def chat_with_assistant(
     db: AsyncSession = Depends(get_db)
 ):
     """Chat with the AI assistant"""
-    vlm_service = await get_vlm_service()
+    # Configure VLM from user settings
+    vlm_service = await configure_vlm_from_settings(current_user.id, db)
     
     # Get or create session
     if request.session_id:
@@ -237,7 +258,8 @@ async def query_events(
     db: AsyncSession = Depends(get_db)
 ):
     """Query events using natural language"""
-    vlm_service = await get_vlm_service()
+    # Configure VLM from user settings
+    vlm_service = await configure_vlm_from_settings(current_user.id, db)
     
     # Build events query with camera join
     events_query = (
