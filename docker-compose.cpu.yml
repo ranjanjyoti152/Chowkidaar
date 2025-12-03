@@ -1,0 +1,105 @@
+# Chowkidaar NVR - Docker Compose (CPU-only, no GPU)
+# Use this if you don't have an NVIDIA GPU
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: chowkidaar-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-chowkidaar}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-chowkidaar_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-chowkidaar}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-chowkidaar} -d ${POSTGRES_DB:-chowkidaar}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis (for caching and message queue)
+  redis:
+    image: redis:7-alpine
+    container_name: chowkidaar-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Ollama VLM Server (CPU mode)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: chowkidaar-ollama
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+
+  # Backend API (CPU mode)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: chowkidaar-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-chowkidaar}:${POSTGRES_PASSWORD:-chowkidaar_secret}@postgres:5432/${POSTGRES_DB:-chowkidaar}
+      - REDIS_URL=redis://redis:6379
+      - SECRET_KEY=${SECRET_KEY:-change-this-in-production-please}
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llava}
+      - YOLO_MODEL=${YOLO_MODEL:-yolov8n.pt}
+      - YOLO_DEVICE=cpu
+      - DATA_DIR=/data
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - ./data/recordings:/data/recordings
+      - ./data/snapshots:/data/snapshots
+      - ./data/models:/data/models
+    ports:
+      - "8000:8000"
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: chowkidaar-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+
+volumes:
+  postgres_data:
+    name: chowkidaar_postgres
+  redis_data:
+    name: chowkidaar_redis
+  ollama_data:
+    name: chowkidaar_ollama
+
+networks:
+  default:
+    name: chowkidaar_network
+    driver: bridge
