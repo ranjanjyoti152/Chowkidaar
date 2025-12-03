@@ -10,15 +10,27 @@ from app.core.database import Base
 
 
 class EventType(str, enum.Enum):
-    """Case-insensitive event type enum"""
+    """Case-insensitive event type enum - LLM can classify into these"""
+    # Basic detections
     person_detected = "person_detected"
     vehicle_detected = "vehicle_detected"
-    fire_detected = "fire_detected"
-    smoke_detected = "smoke_detected"
     animal_detected = "animal_detected"
     motion_detected = "motion_detected"
-    intrusion = "intrusion"
-    loitering = "loitering"
+    
+    # Intelligent classifications (LLM decides)
+    delivery = "delivery"           # Delivery person, courier, postman
+    visitor = "visitor"             # Guest, friend, family member
+    package_left = "package_left"   # Package/parcel left at door
+    suspicious = "suspicious"       # Suspicious behavior, lurking
+    intrusion = "intrusion"         # Unauthorized entry attempt
+    loitering = "loitering"         # Person staying too long
+    theft_attempt = "theft_attempt" # Stealing, taking items
+    
+    # Emergency
+    fire_detected = "fire_detected"
+    smoke_detected = "smoke_detected"
+    
+    # Other
     custom = "custom"
     
     @classmethod

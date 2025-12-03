@@ -25,12 +25,26 @@ EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;
 
--- Event type enum
+-- Event type enum (includes LLM-classified intelligent types)
 DO $$ BEGIN
     CREATE TYPE event_type AS ENUM (
-        'person_detected', 'vehicle_detected', 'fire_detected', 
-        'smoke_detected', 'animal_detected', 'motion_detected', 
-        'intrusion', 'loitering', 'custom'
+        -- Basic detections (YOLO)
+        'person_detected', 'vehicle_detected', 'animal_detected', 'motion_detected',
+        
+        -- Intelligent classifications (LLM decides)
+        'delivery',           -- Delivery person, courier, postman, food delivery
+        'visitor',            -- Guest, friend, family member visiting
+        'package_left',       -- Package/parcel left at door
+        'suspicious',         -- Suspicious behavior, lurking, unknown person
+        'intrusion',          -- Unauthorized entry attempt
+        'loitering',          -- Person staying too long without purpose
+        'theft_attempt',      -- Stealing, taking items
+        
+        -- Emergency
+        'fire_detected', 'smoke_detected',
+        
+        -- Other
+        'custom'
     );
 EXCEPTION
     WHEN duplicate_object THEN null;

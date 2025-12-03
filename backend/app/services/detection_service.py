@@ -400,11 +400,24 @@ Consider these threat scenarios:
 - MEDIUM: Unknown person during day, vehicle in unusual location, animals that could be dangerous
 - LOW: Normal activity, known safe scenarios, pets, regular vehicle movement
 
-3. THREAT_REASON: One sentence explaining why this threat level.
+3. EVENT_TYPE: Classify this event into ONE of these categories:
+   - delivery: Person delivering package, courier, postman, food delivery
+   - visitor: Known person, guest, family member visiting
+   - package_left: Package or parcel left at door/property
+   - suspicious: Unknown person lurking, hiding, looking around suspiciously
+   - intrusion: Someone trying to break in, unauthorized entry
+   - loitering: Person staying too long without clear purpose
+   - theft_attempt: Someone stealing or taking items
+   - person_detected: Normal person, cannot determine specific type
+   - vehicle_detected: Vehicle movement
+   - animal_detected: Animal or pet
+
+4. THREAT_REASON: One sentence explaining why this threat level.
 
 Format your response EXACTLY like this:
 SUMMARY: [your summary here]
 THREAT_LEVEL: [low/medium/high/critical]
+EVENT_TYPE: [one of the types above]
 THREAT_REASON: [reason here]
 
 Do NOT use markdown. Be direct and factual."""
@@ -416,6 +429,7 @@ Do NOT use markdown. Be direct and factual."""
                 # Parse the response
                 summary = ""
                 threat_level = "low"
+                event_type_str = ""
                 threat_reason = ""
                 
                 lines = response.strip().split('\n')
@@ -427,6 +441,8 @@ Do NOT use markdown. Be direct and factual."""
                         level = line[13:].strip().lower()
                         if level in ['low', 'medium', 'high', 'critical']:
                             threat_level = level
+                    elif line.upper().startswith('EVENT_TYPE:'):
+                        event_type_str = line[11:].strip().lower()
                     elif line.upper().startswith('THREAT_REASON:'):
                         threat_reason = line[14:].strip()
                 
@@ -443,30 +459,56 @@ Do NOT use markdown. Be direct and factual."""
                 }
                 new_severity = severity_map.get(threat_level, EventSeverity.low)
                 
-                # Update event with AI-analyzed summary and severity
+                # Map LLM event type to enum
+                event_type_map = {
+                    'delivery': EventType.delivery,
+                    'visitor': EventType.visitor,
+                    'package_left': EventType.package_left,
+                    'suspicious': EventType.suspicious,
+                    'intrusion': EventType.intrusion,
+                    'loitering': EventType.loitering,
+                    'theft_attempt': EventType.theft_attempt,
+                    'person_detected': EventType.person_detected,
+                    'vehicle_detected': EventType.vehicle_detected,
+                    'animal_detected': EventType.animal_detected,
+                    'fire_detected': EventType.fire_detected,
+                    'smoke_detected': EventType.smoke_detected,
+                }
+                new_event_type = event_type_map.get(event_type_str)
+                
+                # Prepare update values
+                update_values = {
+                    "summary": summary,
+                    "severity": new_severity,
+                    "detection_metadata": {
+                        "ai_threat_level": threat_level,
+                        "ai_event_type": event_type_str,
+                        "ai_threat_reason": threat_reason,
+                        "time_context": time_context,
+                        "analyzed_at": datetime.utcnow().isoformat()
+                    },
+                    "summary_generated_at": datetime.utcnow()
+                }
+                
+                # Update event type only if LLM classified it
+                if new_event_type:
+                    update_values["event_type"] = new_event_type
+                
+                # Update event with AI-analyzed summary, severity and event type
                 async with AsyncSessionLocal() as db:
                     from sqlalchemy import update
                     await db.execute(
                         update(Event)
                         .where(Event.id == event_id)
-                        .values(
-                            summary=summary,
-                            severity=new_severity,
-                            detection_metadata={
-                                "ai_threat_level": threat_level,
-                                "ai_threat_reason": threat_reason,
-                                "time_context": time_context,
-                                "analyzed_at": datetime.utcnow().isoformat()
-                            },
-                            summary_generated_at=datetime.utcnow()
-                        )
+                        .values(**update_values)
                     )
                     await db.commit()
                     
+                    event_label = event_type_str or "unknown"
                     if threat_level in ['high', 'critical']:
-                        logger.warning(f"🚨 HIGH THREAT Event {event_id}: {threat_level.upper()} - {threat_reason}")
+                        logger.warning(f"🚨 {threat_level.upper()} THREAT Event {event_id}: {event_label} - {threat_reason}")
                     else:
-                        logger.info(f"✨ Event {event_id} analyzed: {threat_level} severity - {summary[:50]}...")
+                        logger.info(f"✨ Event {event_id} classified as '{event_label}' ({threat_level}) - {summary[:50]}...")
                     
         except Exception as e:
             logger.error(f"Failed to generate summary: {e}")
