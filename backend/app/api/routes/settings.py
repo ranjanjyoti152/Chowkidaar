@@ -10,7 +10,8 @@ from app.models.user import User
 from app.models.settings import UserSettings
 from app.schemas.settings import (
     SettingsResponse, SettingsUpdate, 
-    DetectionSettings, VLMSettings, StorageSettings, NotificationSettings
+    DetectionSettings, VLMSettings, StorageSettings, NotificationSettings,
+    TelegramSettings, EmailSettings
 )
 from app.api.deps import get_current_user
 
@@ -59,9 +60,28 @@ async def get_settings(
         ),
         notifications=NotificationSettings(
             enabled=settings.notifications_enabled,
-            email_enabled=settings.email_enabled,
-            email_recipients=settings.email_recipients or [],
-            min_severity=settings.min_severity
+            min_severity=settings.min_severity,
+            event_types=settings.notify_event_types or ["intrusion", "theft_attempt", "suspicious", "fire_detected", "smoke_detected"],
+            telegram=TelegramSettings(
+                enabled=settings.telegram_enabled,
+                bot_token=settings.telegram_bot_token,
+                chat_id=settings.telegram_chat_id,
+                send_photo=settings.telegram_send_photo,
+                send_summary=settings.telegram_send_summary,
+                send_details=settings.telegram_send_details
+            ),
+            email=EmailSettings(
+                enabled=settings.email_enabled,
+                smtp_host=settings.email_smtp_host,
+                smtp_port=settings.email_smtp_port,
+                smtp_user=settings.email_smtp_user,
+                smtp_password=settings.email_smtp_password,
+                from_address=settings.email_from_address,
+                recipients=settings.email_recipients or [],
+                send_photo=settings.email_send_photo,
+                send_summary=settings.email_send_summary,
+                send_details=settings.email_send_details
+            )
         ),
         updated_at=settings.updated_at
     )
@@ -106,10 +126,32 @@ async def update_settings(
     
     # Update notification settings
     if settings_update.notifications:
-        settings.notifications_enabled = settings_update.notifications.enabled
-        settings.email_enabled = settings_update.notifications.email_enabled
-        settings.email_recipients = settings_update.notifications.email_recipients
-        settings.min_severity = settings_update.notifications.min_severity
+        notif = settings_update.notifications
+        settings.notifications_enabled = notif.enabled
+        settings.min_severity = notif.min_severity
+        settings.notify_event_types = notif.event_types
+        
+        # Telegram settings
+        if notif.telegram:
+            settings.telegram_enabled = notif.telegram.enabled
+            settings.telegram_bot_token = notif.telegram.bot_token
+            settings.telegram_chat_id = notif.telegram.chat_id
+            settings.telegram_send_photo = notif.telegram.send_photo
+            settings.telegram_send_summary = notif.telegram.send_summary
+            settings.telegram_send_details = notif.telegram.send_details
+        
+        # Email settings
+        if notif.email:
+            settings.email_enabled = notif.email.enabled
+            settings.email_smtp_host = notif.email.smtp_host
+            settings.email_smtp_port = notif.email.smtp_port
+            settings.email_smtp_user = notif.email.smtp_user
+            settings.email_smtp_password = notif.email.smtp_password
+            settings.email_from_address = notif.email.from_address
+            settings.email_recipients = notif.email.recipients
+            settings.email_send_photo = notif.email.send_photo
+            settings.email_send_summary = notif.email.send_summary
+            settings.email_send_details = notif.email.send_details
     
     await db.commit()
     await db.refresh(settings)
@@ -135,9 +177,28 @@ async def update_settings(
         ),
         notifications=NotificationSettings(
             enabled=settings.notifications_enabled,
-            email_enabled=settings.email_enabled,
-            email_recipients=settings.email_recipients or [],
-            min_severity=settings.min_severity
+            min_severity=settings.min_severity,
+            event_types=settings.notify_event_types or ["intrusion", "theft_attempt", "suspicious", "fire_detected", "smoke_detected"],
+            telegram=TelegramSettings(
+                enabled=settings.telegram_enabled,
+                bot_token=settings.telegram_bot_token,
+                chat_id=settings.telegram_chat_id,
+                send_photo=settings.telegram_send_photo,
+                send_summary=settings.telegram_send_summary,
+                send_details=settings.telegram_send_details
+            ),
+            email=EmailSettings(
+                enabled=settings.email_enabled,
+                smtp_host=settings.email_smtp_host,
+                smtp_port=settings.email_smtp_port,
+                smtp_user=settings.email_smtp_user,
+                smtp_password=settings.email_smtp_password,
+                from_address=settings.email_from_address,
+                recipients=settings.email_recipients or [],
+                send_photo=settings.email_send_photo,
+                send_summary=settings.email_send_summary,
+                send_details=settings.email_send_details
+            )
         ),
         updated_at=settings.updated_at
     )

@@ -15,6 +15,8 @@ import {
   CloudArrowUpIcon,
   TrashIcon,
   PlayIcon,
+  PaperAirplaneIcon,
+  EnvelopeIcon,
 } from '@heroicons/react/24/outline'
 import toast from 'react-hot-toast'
 import { systemApi, settingsApi, SettingsData } from '../services'
@@ -28,6 +30,22 @@ interface YoloModel {
 }
 
 type Settings = SettingsData
+
+// Event types for notification filtering
+const eventTypes = [
+  { id: 'intrusion', label: 'Intrusion', color: 'red' },
+  { id: 'theft_attempt', label: 'Theft Attempt', color: 'red' },
+  { id: 'suspicious', label: 'Suspicious Activity', color: 'orange' },
+  { id: 'fire_detected', label: 'Fire Detected', color: 'red' },
+  { id: 'smoke_detected', label: 'Smoke Detected', color: 'orange' },
+  { id: 'person_detected', label: 'Person Detected', color: 'blue' },
+  { id: 'delivery', label: 'Delivery', color: 'green' },
+  { id: 'visitor', label: 'Visitor', color: 'green' },
+  { id: 'package_left', label: 'Package Left', color: 'cyan' },
+  { id: 'loitering', label: 'Loitering', color: 'yellow' },
+  { id: 'vehicle_detected', label: 'Vehicle Detected', color: 'blue' },
+  { id: 'animal_detected', label: 'Animal Detected', color: 'purple' },
+]
 
 const defaultSettings: Settings = {
   detection: {
@@ -50,9 +68,28 @@ const defaultSettings: Settings = {
   },
   notifications: {
     enabled: true,
-    email_enabled: false,
-    email_recipients: [],
     min_severity: 'high',
+    event_types: ['intrusion', 'theft_attempt', 'suspicious', 'fire_detected', 'smoke_detected'],
+    telegram: {
+      enabled: false,
+      bot_token: '',
+      chat_id: '',
+      send_photo: true,
+      send_summary: true,
+      send_details: true,
+    },
+    email: {
+      enabled: false,
+      smtp_host: '',
+      smtp_port: 587,
+      smtp_user: '',
+      smtp_password: '',
+      from_address: '',
+      recipients: [],
+      send_photo: true,
+      send_summary: true,
+      send_details: true,
+    },
   },
 }
 
@@ -789,12 +826,23 @@ export default function Settings() {
 
             {activeTab === 'notifications' && (
               <div className="space-y-6">
-                <h2 className="text-lg font-semibold text-white">Notification Settings</h2>
+                <div className="flex items-center justify-between">
+                  <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                    <BellIcon className="w-5 h-5 text-primary-400" />
+                    Notification Settings
+                  </h2>
+                </div>
                 
-                <div className="flex items-center justify-between p-4 rounded-xl bg-white/5">
-                  <div>
-                    <p className="text-white font-medium">Enable Notifications</p>
-                    <p className="text-sm text-gray-400">Receive alerts for events</p>
+                {/* Master Toggle */}
+                <div className="flex items-center justify-between p-4 rounded-xl bg-gradient-to-r from-primary-500/10 to-cyan-500/10 border border-primary-500/20">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-primary-500/20 flex items-center justify-center">
+                      <BellIcon className="w-5 h-5 text-primary-400" />
+                    </div>
+                    <div>
+                      <p className="text-white font-medium">Enable Notifications</p>
+                      <p className="text-sm text-gray-400">Receive alerts for events via Telegram & Email</p>
+                    </div>
                   </div>
                   <button
                     onClick={() =>
@@ -806,40 +854,525 @@ export default function Settings() {
                         },
                       })
                     }
-                    className={`relative w-12 h-6 rounded-full transition-colors ${
+                    className={`relative w-14 h-7 rounded-full transition-colors ${
                       settings.notifications.enabled ? 'bg-primary-500' : 'bg-white/20'
                     }`}
                   >
                     <div
-                      className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${
-                        settings.notifications.enabled ? 'translate-x-7' : 'translate-x-1'
+                      className={`absolute top-1 w-5 h-5 rounded-full bg-white shadow-lg transition-transform ${
+                        settings.notifications.enabled ? 'translate-x-8' : 'translate-x-1'
                       }`}
                     />
                   </button>
                 </div>
 
+                {/* Minimum Severity */}
+                <div className="grid grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-400 mb-2">
+                      Minimum Severity
+                    </label>
+                    <select
+                      value={settings.notifications.min_severity}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          notifications: {
+                            ...settings.notifications,
+                            min_severity: e.target.value,
+                          },
+                        })
+                      }
+                      className="input"
+                    >
+                      <option value="low">Low (All events)</option>
+                      <option value="medium">Medium</option>
+                      <option value="high">High</option>
+                      <option value="critical">Critical only</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Event Types Filter */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-400 mb-2">
-                    Minimum Severity
-                  </label>
-                  <select
-                    value={settings.notifications.min_severity}
-                    onChange={(e) =>
-                      setSettings({
-                        ...settings,
-                        notifications: {
-                          ...settings.notifications,
-                          min_severity: e.target.value,
-                        },
-                      })
-                    }
-                    className="input"
-                  >
-                    <option value="low">Low (All events)</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
-                    <option value="critical">Critical only</option>
-                  </select>
+                  <div className="flex items-center justify-between mb-3">
+                    <label className="text-sm font-medium text-gray-300">
+                      Event Types to Notify
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-500">
+                        {settings.notifications.event_types?.length || 0}/{eventTypes.length} selected
+                      </span>
+                      <button
+                        onClick={() => setSettings({
+                          ...settings,
+                          notifications: { 
+                            ...settings.notifications, 
+                            event_types: eventTypes.map(e => e.id) 
+                          }
+                        })}
+                        className="text-xs text-primary-400 hover:text-primary-300"
+                      >
+                        Select All
+                      </button>
+                      <button
+                        onClick={() => setSettings({
+                          ...settings,
+                          notifications: { ...settings.notifications, event_types: [] }
+                        })}
+                        className="text-xs text-gray-400 hover:text-gray-300"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2 p-3 bg-white/5 rounded-xl border border-white/10">
+                    {eventTypes.map((event) => (
+                      <button
+                        key={event.id}
+                        onClick={() => {
+                          const current = settings.notifications.event_types || []
+                          setSettings({
+                            ...settings,
+                            notifications: {
+                              ...settings.notifications,
+                              event_types: current.includes(event.id)
+                                ? current.filter((e) => e !== event.id)
+                                : [...current, event.id],
+                            },
+                          })
+                        }}
+                        className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                          (settings.notifications.event_types || []).includes(event.id)
+                            ? `bg-${event.color}-500/20 text-${event.color}-400 border border-${event.color}-500/30`
+                            : 'bg-white/5 text-gray-400 border border-white/10 hover:border-white/20'
+                        }`}
+                      >
+                        {event.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Telegram Settings */}
+                <div className="p-4 rounded-xl bg-white/5 border border-white/10">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center">
+                        <PaperAirplaneIcon className="w-5 h-5 text-blue-400" />
+                      </div>
+                      <div>
+                        <p className="text-white font-medium">Telegram</p>
+                        <p className="text-sm text-gray-400">Send event alerts to Telegram</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() =>
+                        setSettings({
+                          ...settings,
+                          notifications: {
+                            ...settings.notifications,
+                            telegram: {
+                              ...settings.notifications.telegram,
+                              enabled: !settings.notifications.telegram?.enabled,
+                            },
+                          },
+                        })
+                      }
+                      className={`relative w-14 h-7 rounded-full transition-colors ${
+                        settings.notifications.telegram?.enabled ? 'bg-blue-500' : 'bg-white/20'
+                      }`}
+                    >
+                      <div
+                        className={`absolute top-1 w-5 h-5 rounded-full bg-white shadow-lg transition-transform ${
+                          settings.notifications.telegram?.enabled ? 'translate-x-8' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  {settings.notifications.telegram?.enabled && (
+                    <div className="space-y-4 pt-4 border-t border-white/10">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-400 mb-2">
+                            Bot Token
+                          </label>
+                          <input
+                            type="password"
+                            value={settings.notifications.telegram?.bot_token || ''}
+                            onChange={(e) =>
+                              setSettings({
+                                ...settings,
+                                notifications: {
+                                  ...settings.notifications,
+                                  telegram: {
+                                    ...settings.notifications.telegram,
+                                    bot_token: e.target.value,
+                                  },
+                                },
+                              })
+                            }
+                            placeholder="123456789:ABCDEFGH..."
+                            className="input"
+                          />
+                          <p className="text-xs text-gray-500 mt-1">Get from @BotFather</p>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-400 mb-2">
+                            Chat ID
+                          </label>
+                          <input
+                            type="text"
+                            value={settings.notifications.telegram?.chat_id || ''}
+                            onChange={(e) =>
+                              setSettings({
+                                ...settings,
+                                notifications: {
+                                  ...settings.notifications,
+                                  telegram: {
+                                    ...settings.notifications.telegram,
+                                    chat_id: e.target.value,
+                                  },
+                                },
+                              })
+                            }
+                            placeholder="-1001234567890"
+                            className="input"
+                          />
+                          <p className="text-xs text-gray-500 mt-1">User or Group Chat ID</p>
+                        </div>
+                      </div>
+
+                      {/* What to send */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-400 mb-3">
+                          Include in Notification
+                        </label>
+                        <div className="flex flex-wrap gap-3">
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={settings.notifications.telegram?.send_photo ?? true}
+                              onChange={(e) =>
+                                setSettings({
+                                  ...settings,
+                                  notifications: {
+                                    ...settings.notifications,
+                                    telegram: {
+                                      ...settings.notifications.telegram,
+                                      send_photo: e.target.checked,
+                                    },
+                                  },
+                                })
+                              }
+                              className="w-4 h-4 rounded border-gray-600 bg-white/10 text-primary-500 focus:ring-primary-500"
+                            />
+                            <span className="text-gray-300">📸 Photo</span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={settings.notifications.telegram?.send_summary ?? true}
+                              onChange={(e) =>
+                                setSettings({
+                                  ...settings,
+                                  notifications: {
+                                    ...settings.notifications,
+                                    telegram: {
+                                      ...settings.notifications.telegram,
+                                      send_summary: e.target.checked,
+                                    },
+                                  },
+                                })
+                              }
+                              className="w-4 h-4 rounded border-gray-600 bg-white/10 text-primary-500 focus:ring-primary-500"
+                            />
+                            <span className="text-gray-300">📝 AI Summary</span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={settings.notifications.telegram?.send_details ?? true}
+                              onChange={(e) =>
+                                setSettings({
+                                  ...settings,
+                                  notifications: {
+                                    ...settings.notifications,
+                                    telegram: {
+                                      ...settings.notifications.telegram,
+                                      send_details: e.target.checked,
+                                    },
+                                  },
+                                })
+                              }
+                              className="w-4 h-4 rounded border-gray-600 bg-white/10 text-primary-500 focus:ring-primary-500"
+                            />
+                            <span className="text-gray-300">📋 Event Details</span>
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Email Settings */}
+                <div className="p-4 rounded-xl bg-white/5 border border-white/10">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-orange-500/20 flex items-center justify-center">
+                        <EnvelopeIcon className="w-5 h-5 text-orange-400" />
+                      </div>
+                      <div>
+                        <p className="text-white font-medium">Email</p>
+                        <p className="text-sm text-gray-400">Send event alerts via Email</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() =>
+                        setSettings({
+                          ...settings,
+                          notifications: {
+                            ...settings.notifications,
+                            email: {
+                              ...settings.notifications.email,
+                              enabled: !settings.notifications.email?.enabled,
+                            },
+                          },
+                        })
+                      }
+                      className={`relative w-14 h-7 rounded-full transition-colors ${
+                        settings.notifications.email?.enabled ? 'bg-orange-500' : 'bg-white/20'
+                      }`}
+                    >
+                      <div
+                        className={`absolute top-1 w-5 h-5 rounded-full bg-white shadow-lg transition-transform ${
+                          settings.notifications.email?.enabled ? 'translate-x-8' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  {settings.notifications.email?.enabled && (
+                    <div className="space-y-4 pt-4 border-t border-white/10">
+                      {/* SMTP Settings */}
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-400 mb-2">
+                            SMTP Host
+                          </label>
+                          <input
+                            type="text"
+                            value={settings.notifications.email?.smtp_host || ''}
+                            onChange={(e) =>
+                              setSettings({
+                                ...settings,
+                                notifications: {
+                                  ...settings.notifications,
+                                  email: {
+                                    ...settings.notifications.email,
+                                    smtp_host: e.target.value,
+                                  },
+                                },
+                              })
+                            }
+                            placeholder="smtp.gmail.com"
+                            className="input"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-400 mb-2">
+                            SMTP Port
+                          </label>
+                          <input
+                            type="number"
+                            value={settings.notifications.email?.smtp_port || 587}
+                            onChange={(e) =>
+                              setSettings({
+                                ...settings,
+                                notifications: {
+                                  ...settings.notifications,
+                                  email: {
+                                    ...settings.notifications.email,
+                                    smtp_port: parseInt(e.target.value),
+                                  },
+                                },
+                              })
+                            }
+                            placeholder="587"
+                            className="input"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-400 mb-2">
+                            SMTP Username
+                          </label>
+                          <input
+                            type="text"
+                            value={settings.notifications.email?.smtp_user || ''}
+                            onChange={(e) =>
+                              setSettings({
+                                ...settings,
+                                notifications: {
+                                  ...settings.notifications,
+                                  email: {
+                                    ...settings.notifications.email,
+                                    smtp_user: e.target.value,
+                                  },
+                                },
+                              })
+                            }
+                            placeholder="your-email@gmail.com"
+                            className="input"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-400 mb-2">
+                            SMTP Password
+                          </label>
+                          <input
+                            type="password"
+                            value={settings.notifications.email?.smtp_password || ''}
+                            onChange={(e) =>
+                              setSettings({
+                                ...settings,
+                                notifications: {
+                                  ...settings.notifications,
+                                  email: {
+                                    ...settings.notifications.email,
+                                    smtp_password: e.target.value,
+                                  },
+                                },
+                              })
+                            }
+                            placeholder="App password"
+                            className="input"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-400 mb-2">
+                            From Address
+                          </label>
+                          <input
+                            type="email"
+                            value={settings.notifications.email?.from_address || ''}
+                            onChange={(e) =>
+                              setSettings({
+                                ...settings,
+                                notifications: {
+                                  ...settings.notifications,
+                                  email: {
+                                    ...settings.notifications.email,
+                                    from_address: e.target.value,
+                                  },
+                                },
+                              })
+                            }
+                            placeholder="chowkidaar@example.com"
+                            className="input"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-400 mb-2">
+                            Recipients (comma separated)
+                          </label>
+                          <input
+                            type="text"
+                            value={(settings.notifications.email?.recipients || []).join(', ')}
+                            onChange={(e) =>
+                              setSettings({
+                                ...settings,
+                                notifications: {
+                                  ...settings.notifications,
+                                  email: {
+                                    ...settings.notifications.email,
+                                    recipients: e.target.value.split(',').map(s => s.trim()).filter(Boolean),
+                                  },
+                                },
+                              })
+                            }
+                            placeholder="admin@example.com, security@example.com"
+                            className="input"
+                          />
+                        </div>
+                      </div>
+
+                      {/* What to send */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-400 mb-3">
+                          Include in Email
+                        </label>
+                        <div className="flex flex-wrap gap-3">
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={settings.notifications.email?.send_photo ?? true}
+                              onChange={(e) =>
+                                setSettings({
+                                  ...settings,
+                                  notifications: {
+                                    ...settings.notifications,
+                                    email: {
+                                      ...settings.notifications.email,
+                                      send_photo: e.target.checked,
+                                    },
+                                  },
+                                })
+                              }
+                              className="w-4 h-4 rounded border-gray-600 bg-white/10 text-primary-500 focus:ring-primary-500"
+                            />
+                            <span className="text-gray-300">📸 Photo Attachment</span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={settings.notifications.email?.send_summary ?? true}
+                              onChange={(e) =>
+                                setSettings({
+                                  ...settings,
+                                  notifications: {
+                                    ...settings.notifications,
+                                    email: {
+                                      ...settings.notifications.email,
+                                      send_summary: e.target.checked,
+                                    },
+                                  },
+                                })
+                              }
+                              className="w-4 h-4 rounded border-gray-600 bg-white/10 text-primary-500 focus:ring-primary-500"
+                            />
+                            <span className="text-gray-300">📝 AI Summary</span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={settings.notifications.email?.send_details ?? true}
+                              onChange={(e) =>
+                                setSettings({
+                                  ...settings,
+                                  notifications: {
+                                    ...settings.notifications,
+                                    email: {
+                                      ...settings.notifications.email,
+                                      send_details: e.target.checked,
+                                    },
+                                  },
+                                })
+                              }
+                              className="w-4 h-4 rounded border-gray-600 bg-white/10 text-primary-500 focus:ring-primary-500"
+                            />
+                            <span className="text-gray-300">📋 Event Details</span>
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}

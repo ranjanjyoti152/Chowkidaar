@@ -27,11 +27,34 @@ class StorageSettings(BaseModel):
     retention_days: int = 30
 
 
+class TelegramSettings(BaseModel):
+    enabled: bool = False
+    bot_token: Optional[str] = None
+    chat_id: Optional[str] = None
+    send_photo: bool = True
+    send_summary: bool = True
+    send_details: bool = True
+
+
+class EmailSettings(BaseModel):
+    enabled: bool = False
+    smtp_host: Optional[str] = None
+    smtp_port: int = 587
+    smtp_user: Optional[str] = None
+    smtp_password: Optional[str] = None
+    from_address: Optional[str] = None
+    recipients: List[str] = []
+    send_photo: bool = True
+    send_summary: bool = True
+    send_details: bool = True
+
+
 class NotificationSettings(BaseModel):
     enabled: bool = True
-    email_enabled: bool = False
-    email_recipients: List[str] = []
     min_severity: str = "high"
+    event_types: List[str] = ["intrusion", "theft_attempt", "suspicious", "fire_detected", "smoke_detected"]
+    telegram: TelegramSettings = TelegramSettings()
+    email: EmailSettings = EmailSettings()
 
 
 class SettingsResponse(BaseModel):

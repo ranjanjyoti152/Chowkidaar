@@ -43,9 +43,30 @@ class UserSettings(Base):
     
     # Notification settings
     notifications_enabled: Mapped[bool] = mapped_column(default=True)
-    email_enabled: Mapped[bool] = mapped_column(default=False)
-    email_recipients: Mapped[list] = mapped_column(JSON, default=list)
     min_severity: Mapped[str] = mapped_column(String(20), default="high")
+    
+    # Telegram settings
+    telegram_enabled: Mapped[bool] = mapped_column(default=False)
+    telegram_bot_token: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    telegram_chat_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    telegram_send_photo: Mapped[bool] = mapped_column(default=True)
+    telegram_send_summary: Mapped[bool] = mapped_column(default=True)
+    telegram_send_details: Mapped[bool] = mapped_column(default=True)
+    
+    # Email settings
+    email_enabled: Mapped[bool] = mapped_column(default=False)
+    email_smtp_host: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    email_smtp_port: Mapped[int] = mapped_column(default=587)
+    email_smtp_user: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    email_smtp_password: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    email_from_address: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    email_recipients: Mapped[list] = mapped_column(JSON, default=list)
+    email_send_photo: Mapped[bool] = mapped_column(default=True)
+    email_send_summary: Mapped[bool] = mapped_column(default=True)
+    email_send_details: Mapped[bool] = mapped_column(default=True)
+    
+    # Event type filters for notifications
+    notify_event_types: Mapped[list] = mapped_column(JSON, default=lambda: ["intrusion", "theft_attempt", "suspicious", "fire_detected", "smoke_detected"])
     
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(

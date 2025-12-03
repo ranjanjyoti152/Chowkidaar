@@ -13,9 +13,11 @@ import uuid
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
+from sqlalchemy import select, update
 from app.services.yolo_detector import get_detector
 from app.services.stream_handler import get_stream_manager
 from app.services.ollama_vlm import get_vlm_service
+from app.services.notification_service import send_event_notification
 from app.models.event import Event, EventType, EventSeverity
 from app.models.camera import Camera
 from app.models.settings import UserSettings
@@ -61,7 +63,7 @@ class DetectionService:
             try:
                 # Get all cameras with detection enabled
                 async with AsyncSessionLocal() as db:
-                    from sqlalchemy import select
+                    # import at top
                     result = await db.execute(
                         select(Camera).where(Camera.detection_enabled == True)
                     )
@@ -209,7 +211,7 @@ class DetectionService:
         """Get user's enabled detection classes from settings"""
         try:
             async with AsyncSessionLocal() as db:
-                from sqlalchemy import select
+                # import at top
                 result = await db.execute(
                     select(UserSettings).where(UserSettings.user_id == user_id)
                 )
@@ -229,7 +231,7 @@ class DetectionService:
         """Get user's detection settings from database"""
         try:
             async with AsyncSessionLocal() as db:
-                from sqlalchemy import select
+                # import at top
                 result = await db.execute(
                     select(UserSettings).where(UserSettings.user_id == user_id)
                 )
@@ -251,7 +253,7 @@ class DetectionService:
         """Get user's VLM settings from database"""
         try:
             async with AsyncSessionLocal() as db:
-                from sqlalchemy import select
+                # import at top
                 result = await db.execute(
                     select(UserSettings).where(UserSettings.user_id == user_id)
                 )
@@ -331,9 +333,9 @@ class DetectionService:
                     
                     logger.info(f"✅ Event created: ID={event.id}, {event_type.value} ({class_name}) on camera {camera_id}")
                     
-                    # Try to generate summary with VLM (don't block)
+                    # Generate summary with VLM and then send notification
                     asyncio.create_task(
-                        self._generate_summary(event.id, frame, [detection])
+                        self._generate_summary_and_notify(event.id, frame, [detection], user_id)
                     )
                     
             except Exception as e:
@@ -365,13 +367,14 @@ class DetectionService:
         # Return absolute path
         return str(filepath)
     
-    async def _generate_summary(
+    async def _generate_summary_and_notify(
         self, 
         event_id: int, 
         frame: np.ndarray,
-        detections: List[dict]
+        detections: List[dict],
+        user_id: int
     ):
-        """Generate VLM summary and intelligent severity assessment for event"""
+        """Generate VLM summary, intelligent severity assessment, and send notification"""
         try:
             vlm = await get_vlm_service()
             
@@ -496,7 +499,7 @@ Do NOT use markdown. Be direct and factual."""
                 
                 # Update event with AI-analyzed summary, severity and event type
                 async with AsyncSessionLocal() as db:
-                    from sqlalchemy import update
+                    # import at top
                     await db.execute(
                         update(Event)
                         .where(Event.id == event_id)
@@ -509,6 +512,15 @@ Do NOT use markdown. Be direct and factual."""
                         logger.warning(f"🚨 {threat_level.upper()} THREAT Event {event_id}: {event_label} - {threat_reason}")
                     else:
                         logger.info(f"✨ Event {event_id} classified as '{event_label}' ({threat_level}) - {summary[:50]}...")
+                    
+                    # Send notification after summary is generated
+                    # Fetch updated event for notification
+                    result = await db.execute(
+                        select(Event).where(Event.id == event_id)
+                    )
+                    updated_event = result.scalar_one_or_none()
+                    if updated_event:
+                        await send_event_notification(updated_event, user_id)
                     
         except Exception as e:
             logger.error(f"Failed to generate summary: {e}")

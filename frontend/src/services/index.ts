@@ -281,6 +281,28 @@ export const systemApi = {
 }
 
 // Settings API
+export interface TelegramSettings {
+  enabled: boolean
+  bot_token?: string
+  chat_id?: string
+  send_photo: boolean
+  send_summary: boolean
+  send_details: boolean
+}
+
+export interface EmailSettings {
+  enabled: boolean
+  smtp_host?: string
+  smtp_port: number
+  smtp_user?: string
+  smtp_password?: string
+  from_address?: string
+  recipients: string[]
+  send_photo: boolean
+  send_summary: boolean
+  send_details: boolean
+}
+
 export interface SettingsData {
   detection: {
     model: string
@@ -302,9 +324,10 @@ export interface SettingsData {
   }
   notifications: {
     enabled: boolean
-    email_enabled: boolean
-    email_recipients: string[]
     min_severity: string
+    event_types: string[]
+    telegram: TelegramSettings
+    email: EmailSettings
   }
   updated_at?: string
 }

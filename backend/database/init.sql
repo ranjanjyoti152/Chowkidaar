@@ -194,9 +194,28 @@ CREATE TABLE IF NOT EXISTS user_settings (
     
     -- Notification settings
     notifications_enabled BOOLEAN DEFAULT true,
-    email_enabled BOOLEAN DEFAULT false,
-    email_recipients JSONB DEFAULT '[]',
     min_severity VARCHAR(20) DEFAULT 'high',
+    notify_event_types JSONB DEFAULT '["intrusion", "theft_attempt", "suspicious", "fire_detected", "smoke_detected"]',
+    
+    -- Telegram settings
+    telegram_enabled BOOLEAN DEFAULT false,
+    telegram_bot_token VARCHAR(255),
+    telegram_chat_id VARCHAR(100),
+    telegram_send_photo BOOLEAN DEFAULT true,
+    telegram_send_summary BOOLEAN DEFAULT true,
+    telegram_send_details BOOLEAN DEFAULT true,
+    
+    -- Email settings
+    email_enabled BOOLEAN DEFAULT false,
+    email_smtp_host VARCHAR(255),
+    email_smtp_port INTEGER DEFAULT 587,
+    email_smtp_user VARCHAR(255),
+    email_smtp_password VARCHAR(255),
+    email_from_address VARCHAR(255),
+    email_recipients JSONB DEFAULT '[]',
+    email_send_photo BOOLEAN DEFAULT true,
+    email_send_summary BOOLEAN DEFAULT true,
+    email_send_details BOOLEAN DEFAULT true,
     
     created_at TIMESTAMP DEFAULT NOW() NOT NULL,
     updated_at TIMESTAMP DEFAULT NOW() NOT NULL
