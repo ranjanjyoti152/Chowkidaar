@@ -1,10 +1,11 @@
 import axios from 'axios'
 import { useAuthStore } from '../store/authStore'
 
-// Backend server URL - configure in .env for edge devices
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1'
-export const WS_BASE_URL = import.meta.env.VITE_WS_BASE_URL || 
-  `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`
+// Backend server URL from .env
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1'
+export const WS_BASE_URL = import.meta.env.VITE_WS_BASE_URL || 'ws://localhost:8001/ws'
+
+console.log('🔗 API Base URL:', API_BASE_URL)
 
 // Edge device configuration
 export const DEVICE_ID = import.meta.env.VITE_DEVICE_ID || localStorage.getItem('device_id') || generateDeviceId()

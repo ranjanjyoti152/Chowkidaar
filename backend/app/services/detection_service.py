@@ -479,6 +479,7 @@ Do NOT use markdown. Be direct and factual."""
                     'person_detected': EventType.person_detected,
                     'vehicle_detected': EventType.vehicle_detected,
                     'animal_detected': EventType.animal_detected,
+                    'motion_detected': EventType.motion_detected,
                     'fire_detected': EventType.fire_detected,
                     'smoke_detected': EventType.smoke_detected,
                 }
@@ -542,9 +543,10 @@ Do NOT use markdown. Be direct and factual."""
             return EventType.person_detected
         if any(c in classes for c in ["car", "truck", "bus", "motorcycle"]):
             return EventType.vehicle_detected
-        if any(c in classes for c in ["dog", "cat", "bird"]):
+        if any(c in classes for c in ["dog", "cat", "bird", "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe"]):
             return EventType.animal_detected
         
+        # For all other objects (chair, tv, laptop, etc.) - just motion/object detected
         return EventType.motion_detected
     
     def _get_severity(self, detections: List[dict]) -> EventSeverity:

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useMutation } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import {
   CogIcon,
@@ -113,7 +113,6 @@ export default function Settings() {
   const [isUploading, setIsUploading] = useState(false)
   const [activeYoloModel, setActiveYoloModel] = useState<string>('')
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const queryClient = useQueryClient()
 
   // Fetch Ollama models via backend API (avoids CORS issues)
   const fetchOllamaModels = async (url: string) => {
@@ -170,14 +169,20 @@ export default function Settings() {
 
   const saveMutation = useMutation({
     mutationFn: async (newSettings: Settings) => {
-      return await settingsApi.update(newSettings)
+      console.log('📤 Saving settings:', JSON.stringify(newSettings, null, 2))
+      const result = await settingsApi.update(newSettings)
+      console.log('📥 Response:', JSON.stringify(result, null, 2))
+      return result
     },
     onSuccess: (data) => {
+      console.log('✅ Save successful, updating state')
       setSettings(data)
-      queryClient.invalidateQueries({ queryKey: ['settings'] })
+      // Don't invalidate - we already have the latest data from response
+      // queryClient.invalidateQueries({ queryKey: ['settings'] })
       toast.success('Settings saved successfully')
     },
-    onError: () => {
+    onError: (error) => {
+      console.error('❌ Save failed:', error)
       toast.error('Failed to save settings')
     },
   })
