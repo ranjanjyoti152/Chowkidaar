@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion } from 'framer-motion'
 import { format } from 'date-fns'
 import {
   ChatBubbleLeftRightIcon,
@@ -85,13 +85,16 @@ export default function Assistant() {
       setMessages((prev) => [...prev, userMessage])
     },
     onSuccess: (response) => {
+      // Only include images if there are any and they're relevant (max 4)
+      const relevantImages = response.events_with_images?.slice(0, 4) || []
+      
       // Add assistant response with events_with_images
       const assistantMessage: ExtendedChatMessage = {
         id: Date.now() + 1,
         role: 'assistant',
         content: response.message,
         created_at: new Date().toISOString(),
-        events_with_images: response.events_with_images,
+        events_with_images: relevantImages.length > 0 ? relevantImages : undefined,
       }
       setMessages((prev) => [...prev, assistantMessage])
       
@@ -252,16 +255,16 @@ export default function Assistant() {
               </div>
             ) : (
               <>
-                <AnimatePresence>
-                  {messages.map((message) => (
-                    <motion.div
-                      key={message.id}
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className={`flex gap-4 ${
-                        message.role === 'user' ? 'flex-row-reverse' : 'flex-row'
-                      }`}
-                    >
+                {messages.map((message) => (
+                  <motion.div
+                    key={message.id}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.2 }}
+                    className={`flex gap-4 ${
+                      message.role === 'user' ? 'flex-row-reverse' : 'flex-row'
+                    }`}
+                  >
                       {/* Avatar */}
                       {message.role === 'assistant' ? (
                         <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center flex-shrink-0 shadow-lg shadow-primary-500/40">
@@ -345,7 +348,6 @@ export default function Assistant() {
                       </div>
                     </motion.div>
                   ))}
-                </AnimatePresence>
 
                 {chatMutation.isPending && (
                   <motion.div

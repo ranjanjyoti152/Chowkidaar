@@ -150,15 +150,17 @@ docker compose up -d
 # Access the app at http://localhost
 ```
 
-### Option 2: Manual Development Setup
+### Option 2: Manual Development Setup (Without Docker)
 
 #### 1. Setup PostgreSQL Database
+
+**Option A: Using Docker for PostgreSQL only (Recommended)**
 ```bash
-# Start PostgreSQL container (easiest way)
+# Start PostgreSQL container
 docker run -d \
   --name chowkidaar-db \
   -e POSTGRES_USER=chowkidaar \
-  -e POSTGRES_PASSWORD=chowkidaar123 \
+  -e POSTGRES_PASSWORD=ChowkidaarSecure123 \
   -e POSTGRES_DB=chowkidaar \
   -p 5533:5432 \
   -v chowkidaar_postgres:/var/lib/postgresql/data \
@@ -166,10 +168,22 @@ docker run -d \
 
 # Initialize database schema
 docker exec -i chowkidaar-db psql -U chowkidaar -d chowkidaar < backend/database/init.sql
+```
 
-# Or use existing PostgreSQL:
-psql -U postgres -c "CREATE DATABASE chowkidaar;"
-psql -U postgres -d chowkidaar < backend/database/init.sql
+**Option B: Using System PostgreSQL**
+```bash
+# Install PostgreSQL (Ubuntu/Debian)
+sudo apt install postgresql postgresql-contrib
+
+# Create database and user
+sudo -u postgres psql << EOF
+CREATE USER chowkidaar WITH PASSWORD 'ChowkidaarSecure123';
+CREATE DATABASE chowkidaar OWNER chowkidaar;
+GRANT ALL PRIVILEGES ON DATABASE chowkidaar TO chowkidaar;
+EOF
+
+# Initialize schema
+PGPASSWORD=ChowkidaarSecure123 psql -h localhost -U chowkidaar -d chowkidaar < backend/database/init.sql
 ```
 
 #### 2. Setup Ollama (Vision LLM)
@@ -181,57 +195,113 @@ curl -fsSL https://ollama.com/install.sh | sh
 ollama pull llama3.2-vision:11b  # Best for security analysis
 ollama pull gemma3:4b             # Lightweight chat model
 
-# Start Ollama server
+# Start Ollama server (runs on port 11434)
 ollama serve
+
+# For remote Ollama server, note the IP (e.g., http://192.168.1.100:11434)
 ```
 
-#### 3. Setup Backend
+#### 3. Setup Backend (FastAPI + Uvicorn)
 ```bash
 cd backend
 
 # Create virtual environment
-python3.12 -m venv venv
-source venv/bin/activate
+python3 -m venv venv
+source venv/bin/activate  # Linux/Mac
+# OR: venv\Scripts\activate  # Windows
 
 # Install dependencies
 pip install -r requirements.txt
 
 # Create .env file
-cat > .env << EOF
-DATABASE_URL=postgresql+asyncpg://chowkidaar:chowkidaar123@localhost:5533/chowkidaar
-SECRET_KEY=your-super-secret-key-change-this
+cat > .env << 'EOF'
+# Application
+APP_NAME=Chowkidaar
+DEBUG=true
+SECRET_KEY=your-super-secret-key-change-in-production
+
+# Database (adjust port if using system PostgreSQL: 5432)
+DATABASE_URL=postgresql+asyncpg://chowkidaar:ChowkidaarSecure123@localhost:5533/chowkidaar
+DATABASE_SYNC_URL=postgresql+psycopg2://chowkidaar:ChowkidaarSecure123@localhost:5533/chowkidaar
+
+# JWT
+JWT_SECRET_KEY=jwt-secret-key-change-in-production
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+
+# Ollama (update IP if remote)
 OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_VLM_MODEL=llama3.2-vision:11b
+OLLAMA_VLM_MODEL=gemma3:4b
 OLLAMA_CHAT_MODEL=gemma3:4b
+
+# YOLO
 YOLO_MODEL_PATH=yolov8n.pt
-YOLO_DEVICE=0
+YOLO_CONFIDENCE_THRESHOLD=0.5
+
+# Storage paths
+BASE_PATH=/path/to/your/NVR/backend
+FRAMES_STORAGE_PATH=/path/to/your/NVR/backend/storage/frames
+EVENTS_STORAGE_PATH=/path/to/your/NVR/backend/storage/events
+
+# CORS
+CORS_ORIGINS=*
 EOF
+
+# Create storage directories
+mkdir -p storage/frames storage/events
 
 # Start backend server
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8001
+
+# Backend will run at: http://localhost:8001
+# API Docs at: http://localhost:8001/docs
 ```
 
-#### 4. Setup Frontend
+#### 4. Setup Frontend (React + Vite)
+
+Open a **new terminal**:
 ```bash
 cd frontend
 
-# Install dependencies
+# Install Node.js dependencies
 npm install
 
 # Create .env file
-echo "VITE_API_BASE_URL=http://localhost:8001/api/v1" > .env
+cat > .env << 'EOF'
+VITE_API_URL=http://localhost:8001
+EOF
 
-# Start development server
+# Start frontend development server
+npm run dev
+
+# Frontend will run at: http://localhost:5173
+```
+
+#### 5. Running Both Together
+
+**Terminal 1 - Backend:**
+```bash
+cd backend
+source venv/bin/activate
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8001
+```
+
+**Terminal 2 - Frontend:**
+```bash
+cd frontend
 npm run dev
 ```
 
-#### 5. Access Application
-- **Frontend**: http://localhost:5173
-- **Backend API**: http://localhost:8001
-- **API Docs**: http://localhost:8001/docs
+#### 6. Access Application
+| Service | URL |
+|---------|-----|
+| Frontend | http://localhost:5173 |
+| Backend API | http://localhost:8001 |
+| API Documentation | http://localhost:8001/docs |
+| Ollama | http://localhost:11434 |
 
-#### 6. Create First User
-Register through the UI or use API:
+#### 7. Create First Admin User
+
+**Via API:**
 ```bash
 curl -X POST http://localhost:8001/api/v1/auth/register \
   -H "Content-Type: application/json" \
@@ -242,6 +312,58 @@ curl -X POST http://localhost:8001/api/v1/auth/register \
     "full_name": "Admin User"
   }'
 ```
+
+**Or via Frontend:** Go to http://localhost:5173 and click "Register"
+
+#### 8. Add Your First Camera
+
+After login, go to **Cameras** page and add:
+- **Name:** Front Door Camera
+- **RTSP URL:** rtsp://username:password@camera-ip:554/stream1
+- **Enable Detection:** ✓
+
+### Quick Start Script (Linux/Mac)
+
+Create `start.sh` in project root:
+```bash
+#!/bin/bash
+
+# Start Backend
+cd backend
+source venv/bin/activate
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8001 &
+BACKEND_PID=$!
+
+# Start Frontend
+cd ../frontend
+npm run dev &
+FRONTEND_PID=$!
+
+echo "✅ Chowkidaar Started!"
+echo "   Frontend: http://localhost:5173"
+echo "   Backend:  http://localhost:8001"
+echo ""
+echo "Press Ctrl+C to stop..."
+
+# Wait and cleanup
+trap "kill $BACKEND_PID $FRONTEND_PID 2>/dev/null" EXIT
+wait
+```
+
+```bash
+chmod +x start.sh
+./start.sh
+```
+
+### Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| Database connection error | Check PostgreSQL is running: `docker ps` or `systemctl status postgresql` |
+| Ollama not responding | Ensure Ollama is running: `ollama serve` |
+| CUDA not available | Install NVIDIA drivers and CUDA toolkit |
+| Port already in use | Change port: `--port 8002` for backend or `--port 3000` for frontend |
+| CORS errors | Ensure `CORS_ORIGINS=*` in backend .env |
 
 ### Database Schema
 

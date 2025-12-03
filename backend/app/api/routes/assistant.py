@@ -151,11 +151,12 @@ async def chat_with_assistant(
     
     await db.commit()
     
+    # Only return images if user asked for them
     return ChatResponse(
         message=response,
         session_id=session.id,
-        related_events=related_events,
-        events_with_images=events_with_images,
+        related_events=related_events if asking_for_images else [],
+        events_with_images=events_with_images[:4] if asking_for_images else [],  # Max 4 images
         metadata={}
     )
 
