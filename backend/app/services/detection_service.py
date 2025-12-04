@@ -34,6 +34,12 @@ class DetectionService:
         self._event_cooldown = 10  # seconds between same class events per camera
         self._last_vlm_scan: Dict[int, datetime] = {}  # camera_id -> last VLM scan time
         self._vlm_scan_interval = 30  # VLM safety scan every 30 seconds
+        
+        # Anti-hallucination: Multi-frame verification
+        self._vlm_threat_cooldown: Dict[str, datetime] = {}  # "camera_id:threat_type" -> last confirmed alert
+        self._vlm_threat_cooldown_seconds = 180  # 3 minutes between same confirmed threat alerts
+        self._pending_vlm_threats: Dict[int, dict] = {}  # camera_id -> pending threat needing confirmation
+        self._vlm_confirmation_required = 2  # Need 2 consecutive detections to confirm (anti-hallucination)
     
     async def start(self):
         """Start the detection service"""
@@ -713,34 +719,42 @@ THREAT_REASON: [Brief reason for your threat assessment]"""
             else:
                 time_context = "late night"
             
-            # Special prompt for VLM-only safety scan
-            prompt = f"""You are a security AI analyzing a surveillance frame for dangerous situations that automated detection might miss.
+            # Anti-hallucination: Conservative prompt with confidence requirement
+            prompt = f"""You are a VERY CAREFUL security AI. Your job is to detect ONLY REAL, CLEARLY VISIBLE threats.
 
 TIME: {current_time.strftime('%H:%M')} ({time_context})
 
-YOUR MISSION: Look for CRITICAL THREATS that object detection models cannot see:
-1. FIRE or FLAMES anywhere in the image
-2. SMOKE (even small amounts)
-3. WEAPONS (guns, knives, sticks being used as weapons)
-4. PHYSICAL VIOLENCE or FIGHTING
-5. BREAK-IN or forced entry in progress
-6. SUSPICIOUS PACKAGES that could be dangerous
-7. FLOODING or water damage
-8. FALLEN/INJURED person
-9. CHILD in danger or unsupervised in dangerous area
-10. Any other EMERGENCY SITUATION
+CRITICAL WARNINGS - READ CAREFULLY:
+⚠️ FALSE ALARMS ARE VERY BAD - they waste emergency response resources
+⚠️ When in doubt, say SAFE - better to miss something minor than create panic
+⚠️ Normal shadows, reflections, TV screens showing fire/violence are NOT threats
+⚠️ Paintings, posters, or decorations are NOT threats
+⚠️ Red/orange colored objects are NOT automatically fire
+⚠️ People arguing or having normal disagreements is NOT violence
 
-BE VERY CAREFUL:
-- Only report REAL threats you can clearly see
-- False alarms waste resources and reduce trust
-- Normal activities are NOT threats
-- If scene looks safe, say "SAFE"
+ONLY report if you see CLEAR, UNMISTAKABLE evidence of:
+1. REAL FIRE - actual flames burning something, not just orange/red colors
+2. REAL SMOKE - gray/black smoke rising, not steam or mist
+3. REAL WEAPONS - clearly visible gun, knife being threatened with
+4. REAL VIOLENCE - actual physical assault in progress
+5. REAL BREAK-IN - someone forcing entry through door/window
+6. REAL EMERGENCY - person collapsed, child in immediate danger
+
+HOW CONFIDENT ARE YOU? Rate yourself:
+- 90-100%: Absolutely certain, unmistakable threat
+- 70-89%: Very likely a threat, clear evidence
+- 50-69%: Possibly a threat, some evidence
+- Below 50%: Not sure, probably safe
+
+ONLY report threats with 70%+ confidence!
 
 Respond in this EXACT format:
 THREAT_DETECTED: [yes/no]
-THREAT_TYPE: [fire/smoke/weapon/violence/intrusion/suspicious_package/flooding/medical/child_danger/other/none]
-THREAT_LEVEL: [critical/high/medium/low/safe]
-DESCRIPTION: [What you see - be specific about location in frame and what's happening]"""
+CONFIDENCE: [0-100 percentage]
+THREAT_TYPE: [fire/smoke/weapon/violence/intrusion/medical/child_danger/none]
+THREAT_LEVEL: [critical/high/medium/safe]
+DESCRIPTION: [Specific details - WHERE in frame, WHAT exactly you see, WHY you're confident]
+DOUBT: [Any reasons this might be a false alarm]"""
 
             # Use describe_frame with empty detections list
             response = await vlm.describe_frame(frame, [], prompt)
@@ -758,6 +772,19 @@ DESCRIPTION: [What you see - be specific about location in frame and what's happ
             threat_type = "none"
             threat_level = "safe"
             description = ""
+            confidence = 0
+            doubt = ""
+            
+            # Parse CONFIDENCE first (anti-hallucination)
+            if 'CONFIDENCE:' in response_upper:
+                start = response_upper.find('CONFIDENCE:') + 11
+                end = min(start + 20, len(response))
+                conf_str = response_clean[start:end].strip()
+                # Extract number from string like "85%" or "85"
+                import re
+                conf_match = re.search(r'(\d+)', conf_str)
+                if conf_match:
+                    confidence = int(conf_match.group(1))
             
             # Parse THREAT_DETECTED
             if 'THREAT_DETECTED:' in response_upper:
@@ -765,6 +792,16 @@ DESCRIPTION: [What you see - be specific about location in frame and what's happ
                 end = min(start + 20, len(response))
                 answer = response_clean[start:end].strip().lower()
                 threat_detected = 'yes' in answer or 'true' in answer
+            
+            # Parse DOUBT (for logging)
+            if 'DOUBT:' in response_upper:
+                start = response_upper.find('DOUBT:') + 6
+                end = len(response)
+                for marker in ['THREAT_DETECTED:', 'CONFIDENCE:', 'THREAT_TYPE:', 'THREAT_LEVEL:', 'DESCRIPTION:']:
+                    pos = response_upper.find(marker, start)
+                    if pos != -1 and pos < end:
+                        end = pos
+                doubt = response_clean[start:end].strip()
             
             # Parse THREAT_TYPE
             if 'THREAT_TYPE:' in response_upper:
@@ -781,7 +818,7 @@ DESCRIPTION: [What you see - be specific about location in frame and what's happ
             if 'THREAT_LEVEL:' in response_upper:
                 start = response_upper.find('THREAT_LEVEL:') + 13
                 end = len(response)
-                for marker in ['THREAT_TYPE:', 'DESCRIPTION:', 'THREAT_DETECTED:']:
+                for marker in ['THREAT_TYPE:', 'DESCRIPTION:', 'THREAT_DETECTED:', 'DOUBT:', 'CONFIDENCE:']:
                     pos = response_upper.find(marker, start)
                     if pos != -1 and pos < end:
                         end = pos
@@ -793,15 +830,74 @@ DESCRIPTION: [What you see - be specific about location in frame and what's happ
             if 'DESCRIPTION:' in response_upper:
                 start = response_upper.find('DESCRIPTION:') + 12
                 end = len(response)
-                for marker in ['THREAT_DETECTED:', 'THREAT_TYPE:', 'THREAT_LEVEL:']:
+                for marker in ['THREAT_DETECTED:', 'THREAT_TYPE:', 'THREAT_LEVEL:', 'DOUBT:', 'CONFIDENCE:']:
                     pos = response_upper.find(marker, start)
                     if pos != -1 and pos < end:
                         end = pos
                 description = response_clean[start:end].strip()
             
-            # Only create event if real threat detected
+            # ========== ANTI-HALLUCINATION CHECKS ==========
+            
+            # Check 1: Confidence threshold (must be 70%+)
+            if threat_detected and confidence < 70:
+                logger.info(f"⚠️ VLM camera {camera_id}: Threat rejected - low confidence ({confidence}%). Doubt: {doubt[:100] if doubt else 'N/A'}")
+                threat_detected = False
+            
+            # Check 2: Cooldown - don't alert same threat type repeatedly
+            if threat_detected:
+                cooldown_key = f"{camera_id}:{threat_type}"
+                last_alert = self._vlm_threat_cooldown.get(cooldown_key)
+                if last_alert and (datetime.now() - last_alert).total_seconds() < self._vlm_threat_cooldown_seconds:
+                    logger.debug(f"VLM camera {camera_id}: Threat {threat_type} in cooldown, skipping")
+                    threat_detected = False
+            
+            # Check 3: Multi-frame verification (need 2 consecutive detections for same threat)
+            if threat_detected and threat_level in ['high', 'medium']:  # Critical bypasses for speed
+                pending = self._pending_vlm_threats.get(camera_id)
+                
+                if pending and pending.get('threat_type') == threat_type:
+                    # Same threat detected again - CONFIRMED!
+                    pending['count'] = pending.get('count', 1) + 1
+                    if pending['count'] >= self._vlm_confirmation_required:
+                        logger.warning(f"✅ VLM camera {camera_id}: Threat CONFIRMED after {pending['count']} detections: {threat_type}")
+                        # Clear pending and proceed to create event
+                        self._pending_vlm_threats.pop(camera_id, None)
+                    else:
+                        logger.info(f"⏳ VLM camera {camera_id}: Threat {threat_type} pending confirmation ({pending['count']}/{self._vlm_confirmation_required})")
+                        threat_detected = False  # Wait for more confirmations
+                else:
+                    # New threat type or first detection - store as pending
+                    self._pending_vlm_threats[camera_id] = {
+                        'threat_type': threat_type,
+                        'threat_level': threat_level,
+                        'confidence': confidence,
+                        'description': description,
+                        'count': 1,
+                        'first_seen': datetime.now()
+                    }
+                    logger.info(f"⏳ VLM camera {camera_id}: New threat {threat_type} ({confidence}%) - waiting for confirmation...")
+                    threat_detected = False  # Don't alert yet, wait for confirmation
+            
+            # Critical threats bypass multi-frame check but still need high confidence
+            if threat_level == 'critical' and confidence >= 85:
+                threat_detected = True
+                logger.warning(f"🚨 VLM camera {camera_id}: CRITICAL threat ({confidence}%) - immediate alert!")
+            
+            # Clean up old pending threats (older than 2 minutes = probably false positive)
+            if camera_id in self._pending_vlm_threats:
+                pending = self._pending_vlm_threats[camera_id]
+                if (datetime.now() - pending.get('first_seen', datetime.now())).total_seconds() > 120:
+                    logger.debug(f"VLM camera {camera_id}: Clearing stale pending threat")
+                    self._pending_vlm_threats.pop(camera_id, None)
+            
+            # ========== CREATE EVENT IF CONFIRMED ==========
+            
             if threat_detected and threat_level in ['critical', 'high', 'medium']:
-                logger.warning(f"🚨 VLM Safety Scan detected {threat_level.upper()} threat on camera {camera_id}: {threat_type}")
+                logger.warning(f"🚨 VLM Safety Scan CONFIRMED {threat_level.upper()} threat on camera {camera_id}: {threat_type} ({confidence}%)")
+                
+                # Update cooldown
+                cooldown_key = f"{camera_id}:{threat_type}"
+                self._vlm_threat_cooldown[cooldown_key] = datetime.now()
                 
                 # Map threat type to event type
                 threat_event_map = {
@@ -844,7 +940,10 @@ DESCRIPTION: [What you see - be specific about location in frame and what's happ
                             "source": "vlm_safety_scan",
                             "vlm_threat_type": threat_type,
                             "vlm_threat_level": threat_level,
+                            "vlm_confidence": confidence,
                             "vlm_description": description,
+                            "vlm_doubt": doubt,
+                            "verified": True,
                             "time_context": time_context,
                             "scan_time": datetime.now().isoformat()
                         },
@@ -854,7 +953,7 @@ DESCRIPTION: [What you see - be specific about location in frame and what's happ
                     await db.commit()
                     await db.refresh(event)
                     
-                    logger.warning(f"🔥 VLM Safety Event created: ID={event.id}, Type={threat_type}, Level={threat_level}")
+                    logger.warning(f"🔥 VLM Safety Event created: ID={event.id}, Type={threat_type}, Level={threat_level}, Confidence={confidence}%")
                     
                     # Send immediate notification for VLM-detected threats
                     await send_event_notification(event, user_id)
