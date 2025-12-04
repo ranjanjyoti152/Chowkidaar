@@ -3,7 +3,7 @@ Chowkidaar NVR - User Model
 """
 from datetime import datetime
 from typing import Optional, List
-from sqlalchemy import String, Boolean, DateTime, Enum as SQLEnum
+from sqlalchemy import String, Boolean, DateTime, Enum as SQLEnum, Integer, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 import enum
 from app.core.database import Base
@@ -47,6 +47,11 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_superuser: Mapped[bool] = mapped_column(Boolean, default=False)
     
+    # Approval system - new users need admin approval
+    is_approved: Mapped[bool] = mapped_column(Boolean, default=False)
+    approved_by: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=datetime.utcnow,
@@ -80,7 +85,15 @@ class User(Base):
         "UserSettings",
         back_populates="user",
         uselist=False,
-        lazy="selectin"
+        lazy="selectin",
+        cascade="all, delete-orphan"
+    )
+    permissions: Mapped[Optional["UserPermission"]] = relationship(
+        "UserPermission",
+        back_populates="user",
+        uselist=False,
+        lazy="selectin",
+        cascade="all, delete-orphan"
     )
     
     def __repr__(self) -> str:

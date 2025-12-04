@@ -7,6 +7,7 @@ from app.models.camera import Camera, CameraStatus, CameraType
 from app.models.event import Event, EventType, EventSeverity
 from app.models.chat import ChatSession, ChatMessage
 from app.models.settings import UserSettings
+from app.models.permission import UserPermission, ROLE_PERMISSION_TEMPLATES, get_default_permissions_for_role
 
 __all__ = [
     "Base",
@@ -20,5 +21,8 @@ __all__ = [
     "EventSeverity",
     "ChatSession",
     "ChatMessage",
-    "UserSettings"
+    "UserSettings",
+    "UserPermission",
+    "ROLE_PERMISSION_TEMPLATES",
+    "get_default_permissions_for_role"
 ]

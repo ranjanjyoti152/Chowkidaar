@@ -30,6 +30,7 @@ DO $$ BEGIN
     CREATE TYPE event_type AS ENUM (
         -- Basic detections (YOLO)
         'person_detected', 'vehicle_detected', 'animal_detected', 'motion_detected',
+        'object_detected',    -- General objects (furniture, electronics, etc.)
         
         -- Intelligent classifications (LLM decides)
         'delivery',           -- Delivery person, courier, postman, food delivery
@@ -72,6 +73,12 @@ CREATE TABLE IF NOT EXISTS users (
     role user_role DEFAULT 'viewer' NOT NULL,
     is_active BOOLEAN DEFAULT true,
     is_superuser BOOLEAN DEFAULT false,
+    
+    -- Approval system - new users need admin approval
+    is_approved BOOLEAN DEFAULT false,
+    approved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    approved_at TIMESTAMP,
+    
     created_at TIMESTAMP DEFAULT NOW() NOT NULL,
     updated_at TIMESTAMP DEFAULT NOW() NOT NULL,
     last_login TIMESTAMP
@@ -79,6 +86,64 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+CREATE INDEX IF NOT EXISTS idx_users_approved ON users(is_approved);
+
+-- ===========================================
+-- USER PERMISSIONS TABLE (RBAC)
+-- ===========================================
+CREATE TABLE IF NOT EXISTS user_permissions (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    
+    -- Page Access Permissions
+    can_access_dashboard BOOLEAN DEFAULT true,
+    can_access_cameras BOOLEAN DEFAULT true,
+    can_access_events BOOLEAN DEFAULT true,
+    can_access_monitor BOOLEAN DEFAULT true,
+    can_access_assistant BOOLEAN DEFAULT true,
+    can_access_settings BOOLEAN DEFAULT false,
+    can_access_admin BOOLEAN DEFAULT false,
+    
+    -- Camera Permissions
+    can_view_cameras BOOLEAN DEFAULT true,
+    can_add_cameras BOOLEAN DEFAULT false,
+    can_edit_cameras BOOLEAN DEFAULT false,
+    can_delete_cameras BOOLEAN DEFAULT false,
+    can_control_ptz BOOLEAN DEFAULT false,
+    
+    -- Event Permissions
+    can_view_events BOOLEAN DEFAULT true,
+    can_acknowledge_events BOOLEAN DEFAULT false,
+    can_delete_events BOOLEAN DEFAULT false,
+    can_export_events BOOLEAN DEFAULT true,
+    
+    -- Settings Permissions
+    can_modify_detection_settings BOOLEAN DEFAULT false,
+    can_modify_vlm_settings BOOLEAN DEFAULT false,
+    can_modify_notification_settings BOOLEAN DEFAULT false,
+    can_modify_system_settings BOOLEAN DEFAULT false,
+    
+    -- User Management Permissions
+    can_view_users BOOLEAN DEFAULT false,
+    can_add_users BOOLEAN DEFAULT false,
+    can_edit_users BOOLEAN DEFAULT false,
+    can_delete_users BOOLEAN DEFAULT false,
+    can_change_user_roles BOOLEAN DEFAULT false,
+    can_change_user_permissions BOOLEAN DEFAULT false,
+    
+    -- System Permissions
+    can_restart_services BOOLEAN DEFAULT false,
+    can_view_system_logs BOOLEAN DEFAULT false,
+    can_manage_models BOOLEAN DEFAULT false,
+    
+    -- Specific camera access (null = all cameras, array = specific camera IDs)
+    allowed_camera_ids JSONB DEFAULT NULL,
+    
+    created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+    updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_permissions_user ON user_permissions(user_id);
 
 -- ===========================================
 -- CAMERAS TABLE
@@ -284,6 +349,12 @@ CREATE TRIGGER update_chat_sessions_updated_at
 DROP TRIGGER IF EXISTS update_user_settings_updated_at ON user_settings;
 CREATE TRIGGER update_user_settings_updated_at
     BEFORE UPDATE ON user_settings
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_user_permissions_updated_at ON user_permissions;
+CREATE TRIGGER update_user_permissions_updated_at
+    BEFORE UPDATE ON user_permissions
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 

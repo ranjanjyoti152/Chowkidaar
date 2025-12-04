@@ -50,6 +50,8 @@ class UserResponse(UserBase):
     role: UserRole
     is_active: bool
     is_superuser: bool
+    is_approved: bool = False
+    approved_at: Optional[datetime] = None
     created_at: datetime
     last_login: Optional[datetime] = None
     

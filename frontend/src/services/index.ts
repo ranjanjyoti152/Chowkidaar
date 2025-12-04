@@ -83,6 +83,55 @@ export const userApi = {
   deleteUser: async (userId: number): Promise<void> => {
     await api.delete(`/users/${userId}`)
   },
+
+  // Permission management
+  getUserPermissions: async (userId: number): Promise<UserPermissions> => {
+    const response = await api.get(`/users/${userId}/permissions`)
+    return response.data
+  },
+
+  updateUserPermissions: async (userId: number, permissions: UserPermissions): Promise<UserPermissions> => {
+    const response = await api.put(`/users/${userId}/permissions`, permissions)
+    return response.data
+  },
+
+  // User approval management
+  getPendingUsers: async (): Promise<User[]> => {
+    const response = await api.get('/users/pending')
+    return response.data
+  },
+
+  approveUser: async (userId: number): Promise<User> => {
+    const response = await api.post(`/users/${userId}/approve`)
+    return response.data
+  },
+
+  rejectUser: async (userId: number): Promise<void> => {
+    await api.post(`/users/${userId}/reject`)
+  },
+
+  revokeApproval: async (userId: number): Promise<User> => {
+    const response = await api.post(`/users/${userId}/revoke-approval`)
+    return response.data
+  },
+}
+
+// User Permissions interface
+export interface UserPermissions {
+  can_view_dashboard: boolean
+  can_view_events: boolean
+  can_manage_events: boolean
+  can_view_cameras: boolean
+  can_add_cameras: boolean
+  can_edit_cameras: boolean
+  can_delete_cameras: boolean
+  can_view_monitor: boolean
+  can_view_settings: boolean
+  can_manage_settings: boolean
+  can_view_users: boolean
+  can_manage_users: boolean
+  can_view_assistant: boolean
+  allowed_camera_ids: number[] | null
 }
 
 // Camera API

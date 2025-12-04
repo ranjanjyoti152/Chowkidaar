@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_
+from sqlalchemy import select, or_, func
 
 from app.core.database import get_db
 from app.core.security import (
@@ -16,6 +16,7 @@ from app.core.security import (
     verify_token
 )
 from app.models.user import User, UserRole
+from app.models.permission import UserPermission, get_default_permissions_for_role
 from app.schemas.auth import Token, LoginRequest, RefreshTokenRequest, RegisterRequest
 from app.schemas.user import UserResponse
 
@@ -50,6 +51,13 @@ async def login(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is disabled"
+        )
+    
+    # Check if user is approved (superusers and first admin are auto-approved)
+    if not user.is_approved:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your account is pending approval. Please wait for admin to approve your registration."
         )
     
     # Update last login
@@ -96,17 +104,37 @@ async def register(
             detail="Username already taken"
         )
     
+    # Check if this is the first user (will be admin)
+    user_count_result = await db.execute(select(func.count(User.id)))
+    user_count = user_count_result.scalar() or 0
+    is_first_user = user_count == 0
+    
+    # First user is always admin, subsequent users are viewers by default
+    user_role = UserRole.admin if is_first_user else UserRole.viewer
+    
     # Create user
     user = User(
         email=request.email,
         username=request.username,
         hashed_password=get_password_hash(request.password),
         full_name=request.full_name,
-        role=UserRole.admin,  # All users are admin by default
-        is_superuser=True
+        role=user_role,
+        is_superuser=is_first_user,  # Only first user is superuser
+        is_approved=is_first_user,   # First user is auto-approved, others need admin approval
+        approved_at=datetime.utcnow() if is_first_user else None
     )
     
     db.add(user)
+    await db.flush()  # Get user ID
+    
+    # Create default permissions based on role
+    default_perms = get_default_permissions_for_role(user_role.value)
+    permissions = UserPermission(
+        user_id=user.id,
+        **default_perms
+    )
+    db.add(permissions)
+    
     await db.commit()
     await db.refresh(user)
     

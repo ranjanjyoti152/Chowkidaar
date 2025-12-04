@@ -30,6 +30,8 @@ export interface User {
   role: UserRole
   is_active: boolean
   is_superuser: boolean
+  is_approved: boolean
+  approved_at?: string
   created_at: string
   last_login?: string
 }
