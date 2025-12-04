@@ -248,6 +248,11 @@ export const systemApi = {
     return response.data
   },
   
+  testLLMProvider: async (params: { provider: string; url?: string; api_key?: string; model?: string }): Promise<{ status: string; provider: string; models: string[]; model_count?: number; error?: string }> => {
+    const response = await api.post('/system/llm/test', null, { params })
+    return response.data
+  },
+  
   restartDetector: async (): Promise<{ message: string }> => {
     const response = await api.post('/system/restart-detector')
     return response.data
@@ -318,8 +323,14 @@ export interface SettingsData {
     inference_device: string
   }
   vlm: {
+    provider: string  // 'ollama' | 'openai' | 'gemini'
     model: string
     ollama_url: string
+    openai_api_key?: string
+    openai_model: string
+    openai_base_url?: string
+    gemini_api_key?: string
+    gemini_model: string
     auto_summarize: boolean
     summarize_delay_seconds: number
   }

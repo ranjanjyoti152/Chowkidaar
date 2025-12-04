@@ -18,7 +18,7 @@ from app.api.deps import get_current_user, require_admin
 from app.services.system_monitor import get_system_monitor
 from app.services.stream_handler import get_stream_manager
 from app.services.yolo_detector import get_detector
-from app.services.ollama_vlm import get_vlm_service
+from app.services.vlm_service import get_unified_vlm_service
 
 router = APIRouter(prefix="/system", tags=["System"])
 
@@ -75,17 +75,17 @@ async def get_system_health(
     except:
         db_healthy = False
     
-    # Check Ollama
-    ollama_healthy = False
+    # Check VLM service (unified)
+    vlm_healthy = False
     try:
-        vlm_service = await get_vlm_service()
-        ollama_healthy = await vlm_service.check_health()
+        vlm_service = get_unified_vlm_service()
+        vlm_healthy = await vlm_service.check_health()
     except:
         pass
     
     return await monitor.check_health(
         db_healthy=db_healthy,
-        ollama_healthy=ollama_healthy
+        ollama_healthy=vlm_healthy
     )
 
 
@@ -130,9 +130,9 @@ async def get_active_streams(
 async def get_available_models(
     current_user: User = Depends(get_current_user)
 ):
-    """Get list of available Ollama models"""
+    """Get list of available models from unified VLM service"""
     try:
-        vlm_service = await get_vlm_service()
+        vlm_service = get_unified_vlm_service()
         models = await vlm_service.list_models()
         return {"models": models}
     except Exception as e:
@@ -172,6 +172,42 @@ async def test_ollama_connection(
         return {
             "status": "offline",
             "url": test_url,
+            "models": [],
+            "error": str(e)
+        }
+
+
+@router.post("/llm/test")
+async def test_llm_provider(
+    current_user: User = Depends(get_current_user),
+    provider: str = "ollama",
+    url: str = None,
+    api_key: str = None,
+    model: str = None
+):
+    """Test any LLM provider connection (Ollama, OpenAI, Gemini)"""
+    from loguru import logger
+    logger.info(f"Testing LLM provider: {provider}, api_key present: {bool(api_key)}, url: {url}")
+    try:
+        vlm_service = get_unified_vlm_service()
+        result = await vlm_service.test_provider(
+            provider=provider,
+            ollama_url=url,
+            model=model,
+            openai_api_key=api_key if provider == "openai" else None,
+            openai_model=model if provider == "openai" else None,
+            openai_base_url=url if provider == "openai" else None,
+            gemini_api_key=api_key if provider == "gemini" else None,
+            gemini_model=model if provider == "gemini" else None
+        )
+        logger.info(f"Test result: {result}")
+        result["provider"] = provider
+        return result
+    except Exception as e:
+        logger.error(f"LLM test error: {e}")
+        return {
+            "status": "error",
+            "provider": provider,
             "models": [],
             "error": str(e)
         }

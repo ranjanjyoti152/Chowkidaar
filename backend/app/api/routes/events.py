@@ -22,7 +22,7 @@ from app.schemas.event import (
 )
 from app.api.deps import get_current_user
 from app.services.event_processor import get_event_processor
-from app.services.ollama_vlm import get_vlm_service
+from app.services.vlm_service import get_unified_vlm_service
 from app.models.settings import UserSettings
 
 router = APIRouter(prefix="/events", tags=["Events"])
@@ -132,12 +132,18 @@ async def search_events(
     if not all_events:
         return []
     
-    # Configure VLM
-    vlm = await get_vlm_service()
+    # Configure VLM based on provider
+    vlm = get_unified_vlm_service()
+    provider = getattr(user_settings, 'vlm_provider', 'ollama')
     vlm.configure(
-        base_url=user_settings.vlm_url,
-        vlm_model=user_settings.vlm_model,
-        chat_model=user_settings.vlm_model
+        provider=provider,
+        ollama_url=user_settings.vlm_url,
+        ollama_model=user_settings.vlm_model,
+        openai_api_key=getattr(user_settings, 'openai_api_key', None),
+        openai_model=getattr(user_settings, 'openai_model', 'gpt-4o'),
+        openai_base_url=getattr(user_settings, 'openai_base_url', None),
+        gemini_api_key=getattr(user_settings, 'gemini_api_key', None),
+        gemini_model=getattr(user_settings, 'gemini_model', 'gemini-2.0-flash-exp')
     )
     
     # Build event summaries for VLM analysis
@@ -234,7 +240,8 @@ async def get_event_stats(
     db: AsyncSession = Depends(get_db)
 ):
     """Get event statistics"""
-    now = datetime.utcnow()
+    # Use local time instead of UTC for accurate "today" comparison
+    now = datetime.now()
     today = now.date()
     week_ago = now - timedelta(days=7)
     month_ago = now - timedelta(days=30)

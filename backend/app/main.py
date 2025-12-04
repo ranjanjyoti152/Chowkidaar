@@ -16,7 +16,7 @@ from app.core.database import init_db, close_db, AsyncSessionLocal
 from app.api import api_router
 from app.services.yolo_detector import get_detector
 from app.services.stream_handler import get_stream_manager
-from app.services.ollama_vlm import get_vlm_service
+from app.services.vlm_service import get_unified_vlm_service
 from app.services.detection_service import get_detection_service
 from sqlalchemy import select
 
@@ -61,17 +61,44 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"❌ YOLO detector error: {e}")
     
-    # Check Ollama connection
-    logger.info("Checking Ollama connection...")
+    # Check VLM service connection
+    logger.info("Checking VLM service connection...")
     try:
-        vlm_service = await get_vlm_service()
-        if await vlm_service.check_health():
-            models = await vlm_service.list_models()
-            logger.info(f"✅ Ollama connected. Available models: {models}")
+        unified_vlm_service = get_unified_vlm_service()
+        if await unified_vlm_service.check_health():
+            models = await unified_vlm_service.list_models()
+            logger.info(f"✅ VLM service connected. Available models: {models}")
         else:
-            logger.warning("⚠️ Ollama not available")
+            logger.warning("⚠️ VLM service not available")
     except Exception as e:
-        logger.error(f"❌ Ollama error: {e}")
+        logger.error(f"❌ VLM service error: {e}")
+    
+    # Load VLM settings from database and configure unified VLM service
+    logger.info("Loading VLM settings from database...")
+    try:
+        from app.models.settings import UserSettings
+        async with AsyncSessionLocal() as db:
+            # Get first user's settings (or admin settings)
+            result = await db.execute(select(UserSettings).limit(1))
+            user_settings = result.scalar_one_or_none()
+            
+            if user_settings:
+                provider = getattr(user_settings, 'vlm_provider', 'ollama')
+                unified_vlm_service.configure(
+                    provider=provider,
+                    ollama_url=user_settings.vlm_url,
+                    ollama_model=user_settings.vlm_model,
+                    openai_api_key=getattr(user_settings, 'openai_api_key', None),
+                    openai_model=getattr(user_settings, 'openai_model', 'gpt-4o'),
+                    openai_base_url=getattr(user_settings, 'openai_base_url', None),
+                    gemini_api_key=getattr(user_settings, 'gemini_api_key', None),
+                    gemini_model=getattr(user_settings, 'gemini_model', 'gemini-2.0-flash-exp')
+                )
+                logger.info(f"✅ VLM service configured: provider={provider}")
+            else:
+                logger.info("No VLM settings found, using defaults (Ollama)")
+    except Exception as e:
+        logger.error(f"❌ Error loading VLM settings: {e}")
     
     # Start all enabled camera streams automatically
     logger.info("Starting enabled camera streams...")

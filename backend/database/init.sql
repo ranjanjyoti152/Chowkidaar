@@ -190,9 +190,23 @@ CREATE TABLE IF NOT EXISTS user_settings (
     detection_device VARCHAR(50) DEFAULT 'cuda',
     enabled_classes JSONB DEFAULT '["person", "car", "truck", "dog", "cat"]',
     
-    -- VLM settings
+    -- VLM Provider settings
+    vlm_provider VARCHAR(50) DEFAULT 'ollama',        -- 'ollama', 'openai', 'gemini'
+    
+    -- Ollama settings
     vlm_model VARCHAR(100) DEFAULT 'gemma3:4b',
     vlm_url VARCHAR(255) DEFAULT 'http://localhost:11434',
+    
+    -- OpenAI settings
+    openai_api_key VARCHAR(255),
+    openai_model VARCHAR(100) DEFAULT 'gpt-4o',
+    openai_base_url VARCHAR(255),                     -- For OpenAI-compatible APIs
+    
+    -- Gemini settings
+    gemini_api_key VARCHAR(255),
+    gemini_model VARCHAR(100) DEFAULT 'gemini-2.0-flash-exp',
+    
+    -- Common VLM settings
     auto_summarize BOOLEAN DEFAULT true,
     summarize_delay INTEGER DEFAULT 5,
     vlm_safety_scan_enabled BOOLEAN DEFAULT true,

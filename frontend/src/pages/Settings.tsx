@@ -56,8 +56,14 @@ const defaultSettings: Settings = {
     inference_device: 'cuda',
   },
   vlm: {
+    provider: 'ollama',
     model: 'llava',
     ollama_url: 'http://localhost:11434',
+    openai_api_key: '',
+    openai_model: 'gpt-4o',
+    openai_base_url: '',
+    gemini_api_key: '',
+    gemini_model: 'gemini-2.0-flash-exp',
     auto_summarize: true,
     summarize_delay_seconds: 5,
   },
@@ -113,6 +119,32 @@ export default function Settings() {
   const [isUploading, setIsUploading] = useState(false)
   const [activeYoloModel, setActiveYoloModel] = useState<string>('')
   const fileInputRef = useRef<HTMLInputElement>(null)
+  
+  // Provider-specific states
+  const [openaiModels, setOpenaiModels] = useState<string[]>([])
+  const [openaiStatus, setOpenaiStatus] = useState<'checking' | 'online' | 'offline' | 'idle'>('idle')
+  const [geminiModels, setGeminiModels] = useState<string[]>([])
+  const [geminiStatus, setGeminiStatus] = useState<'checking' | 'online' | 'offline' | 'idle'>('idle')
+  const [isTestingProvider, setIsTestingProvider] = useState(false)
+
+  // Available models for each provider
+  const openaiModelOptions = [
+    'gpt-4o',
+    'gpt-4o-mini',
+    'gpt-4-turbo',
+    'gpt-4',
+    'gpt-3.5-turbo',
+    'o1-preview',
+    'o1-mini',
+  ]
+
+  const geminiModelOptions = [
+    'gemini-2.0-flash-exp',
+    'gemini-1.5-flash',
+    'gemini-1.5-flash-8b',
+    'gemini-1.5-pro',
+    'gemini-1.0-pro-vision',
+  ]
 
   // Fetch Ollama models via backend API (avoids CORS issues)
   const fetchOllamaModels = async (url: string) => {
@@ -138,6 +170,67 @@ export default function Settings() {
       setOllamaModels([])
     }
     setIsLoadingModels(false)
+  }
+
+  // Test OpenAI connection
+  const testOpenAIConnection = async (apiKey: string, baseUrl?: string) => {
+    if (!apiKey) {
+      toast.error('Please enter an OpenAI API key')
+      return
+    }
+    setIsTestingProvider(true)
+    setOpenaiStatus('checking')
+    try {
+      const response = await systemApi.testLLMProvider({
+        provider: 'openai',
+        api_key: apiKey,
+        url: baseUrl || undefined,
+      })
+      if (response.status === 'online') {
+        setOpenaiModels(response.models || openaiModelOptions)
+        setOpenaiStatus('online')
+        toast.success(`OpenAI connected (${response.models?.length || 0} models available)`)
+      } else {
+        setOpenaiStatus('offline')
+        setOpenaiModels([])
+        toast.error(response.error || 'Failed to connect to OpenAI')
+      }
+    } catch (error) {
+      setOpenaiStatus('offline')
+      setOpenaiModels([])
+      toast.error('Failed to test OpenAI connection')
+    }
+    setIsTestingProvider(false)
+  }
+
+  // Test Gemini connection
+  const testGeminiConnection = async (apiKey: string) => {
+    if (!apiKey) {
+      toast.error('Please enter a Gemini API key')
+      return
+    }
+    setIsTestingProvider(true)
+    setGeminiStatus('checking')
+    try {
+      const response = await systemApi.testLLMProvider({
+        provider: 'gemini',
+        api_key: apiKey,
+      })
+      if (response.status === 'online') {
+        setGeminiModels(response.models || geminiModelOptions)
+        setGeminiStatus('online')
+        toast.success(`Gemini connected (${response.models?.length || 0} models available)`)
+      } else {
+        setGeminiStatus('offline')
+        setGeminiModels([])
+        toast.error(response.error || 'Failed to connect to Gemini')
+      }
+    } catch (error) {
+      setGeminiStatus('offline')
+      setGeminiModels([])
+      toast.error('Failed to test Gemini connection')
+    }
+    setIsTestingProvider(false)
   }
 
   const { isLoading } = useQuery({
@@ -587,103 +680,337 @@ export default function Settings() {
                     Vision LLM Settings
                   </h2>
                   <div className="flex items-center gap-2">
-                    {ollamaStatus === 'checking' && (
+                    {settings.vlm.provider === 'ollama' && ollamaStatus === 'checking' && (
                       <span className="flex items-center gap-1.5 text-yellow-400 text-sm">
                         <ArrowPathIcon className="w-4 h-4 animate-spin" />
                         Checking...
                       </span>
                     )}
-                    {ollamaStatus === 'online' && (
+                    {settings.vlm.provider === 'ollama' && ollamaStatus === 'online' && (
                       <span className="flex items-center gap-1.5 text-green-400 text-sm">
                         <CheckCircleIcon className="w-4 h-4" />
                         Connected ({ollamaModels.length} models)
                       </span>
                     )}
-                    {ollamaStatus === 'offline' && (
+                    {settings.vlm.provider === 'ollama' && ollamaStatus === 'offline' && (
                       <span className="flex items-center gap-1.5 text-red-400 text-sm">
                         <ExclamationCircleIcon className="w-4 h-4" />
                         Offline
                       </span>
                     )}
+                    {settings.vlm.provider === 'openai' && openaiStatus === 'online' && (
+                      <span className="flex items-center gap-1.5 text-green-400 text-sm">
+                        <CheckCircleIcon className="w-4 h-4" />
+                        OpenAI Connected
+                      </span>
+                    )}
+                    {settings.vlm.provider === 'gemini' && geminiStatus === 'online' && (
+                      <span className="flex items-center gap-1.5 text-green-400 text-sm">
+                        <CheckCircleIcon className="w-4 h-4" />
+                        Gemini Connected
+                      </span>
+                    )}
                   </div>
                 </div>
 
-                {/* Ollama URL with Test Button */}
+                {/* Active Provider Toggle */}
                 <div className="p-4 rounded-xl bg-gradient-to-r from-primary-500/10 to-cyan-500/10 border border-primary-500/20">
-                  <label className="block text-sm font-medium text-gray-300 mb-2">
-                    Ollama Server URL
-                  </label>
-                  <div className="flex gap-3">
-                    <input
-                      type="text"
-                      value={settings.vlm.ollama_url}
-                      onChange={(e) => handleOllamaUrlChange(e.target.value)}
-                      className="input flex-1"
-                      placeholder="http://localhost:11434"
-                    />
-                    <button
-                      onClick={handleTestConnection}
-                      disabled={isLoadingModels}
-                      className="btn-secondary px-4 flex items-center gap-2"
-                    >
-                      {isLoadingModels ? (
-                        <ArrowPathIcon className="w-4 h-4 animate-spin" />
-                      ) : (
-                        <ArrowPathIcon className="w-4 h-4" />
-                      )}
-                      Test
-                    </button>
+                  <div className="flex items-center justify-between mb-4">
+                    <label className="text-sm font-medium text-gray-300">
+                      Active LLM Provider
+                    </label>
+                    <span className="text-xs text-primary-400 font-medium">
+                      Using: {settings.vlm.provider === 'ollama' ? 'Ollama' : settings.vlm.provider === 'openai' ? 'OpenAI' : 'Gemini'}
+                    </span>
+                  </div>
+                  
+                  {/* Toggle Buttons */}
+                  <div className="flex rounded-xl bg-black/30 p-1">
+                    {[
+                      { id: 'ollama', name: 'Ollama', icon: '🏠' },
+                      { id: 'openai', name: 'OpenAI', icon: '🤖' },
+                      { id: 'gemini', name: 'Gemini', icon: '✨' },
+                    ].map((provider) => (
+                      <button
+                        key={provider.id}
+                        onClick={() =>
+                          setSettings({
+                            ...settings,
+                            vlm: { ...settings.vlm, provider: provider.id },
+                          })
+                        }
+                        className={`flex-1 py-3 px-4 rounded-lg text-center transition-all font-medium ${
+                          settings.vlm.provider === provider.id
+                            ? 'bg-primary-500 text-white shadow-lg'
+                            : 'text-gray-400 hover:text-white hover:bg-white/10'
+                        }`}
+                      >
+                        <span className="mr-2">{provider.icon}</span>
+                        {provider.name}
+                      </button>
+                    ))}
                   </div>
                 </div>
 
-                {/* Model Selection */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-400 mb-2">
-                    Select Model
-                  </label>
-                  {ollamaModels.length > 0 ? (
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                      {ollamaModels.map((model) => (
+                {/* Ollama Settings */}
+                {settings.vlm.provider === 'ollama' && (
+                  <>
+                    <div className="p-4 rounded-xl bg-white/5 border border-white/10">
+                      <label className="block text-sm font-medium text-gray-300 mb-2">
+                        Ollama Server URL
+                      </label>
+                      <div className="flex gap-3">
+                        <input
+                          type="text"
+                          value={settings.vlm.ollama_url}
+                          onChange={(e) => handleOllamaUrlChange(e.target.value)}
+                          className="input flex-1"
+                          placeholder="http://localhost:11434"
+                        />
                         <button
-                          key={model}
-                          onClick={() =>
+                          onClick={handleTestConnection}
+                          disabled={isLoadingModels}
+                          className="btn-secondary px-4 flex items-center gap-2"
+                        >
+                          {isLoadingModels ? (
+                            <ArrowPathIcon className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <ArrowPathIcon className="w-4 h-4" />
+                          )}
+                          Test
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Ollama Model Selection */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-400 mb-2">
+                        Select Model
+                      </label>
+                      {ollamaModels.length > 0 ? (
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                          {ollamaModels.map((model) => (
+                            <button
+                              key={model}
+                              onClick={() =>
+                                setSettings({
+                                  ...settings,
+                                  vlm: { ...settings.vlm, model: model },
+                                })
+                              }
+                              className={`p-3 rounded-xl text-left transition-all border ${
+                                settings.vlm.model === model
+                                  ? 'bg-primary-500/20 border-primary-500/50 text-primary-400'
+                                  : 'bg-white/5 border-white/10 text-gray-300 hover:border-white/20 hover:bg-white/10'
+                              }`}
+                            >
+                              <p className="font-medium truncate">{model.split(':')[0]}</p>
+                              <p className="text-xs text-gray-500 mt-1">
+                                {model.includes(':') ? model.split(':')[1] : 'latest'}
+                              </p>
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="p-6 rounded-xl bg-white/5 border border-white/10 text-center">
+                          {ollamaStatus === 'checking' ? (
+                            <div className="flex flex-col items-center gap-2">
+                              <ArrowPathIcon className="w-8 h-8 text-gray-500 animate-spin" />
+                              <p className="text-gray-400">Loading models...</p>
+                            </div>
+                          ) : (
+                            <div className="flex flex-col items-center gap-2">
+                              <ExclamationCircleIcon className="w-8 h-8 text-gray-500" />
+                              <p className="text-gray-400">No models found</p>
+                              <p className="text-sm text-gray-500">
+                                Check if Ollama is running at the specified URL
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+
+                {/* OpenAI Settings */}
+                {settings.vlm.provider === 'openai' && (
+                  <>
+                    <div className="p-4 rounded-xl bg-white/5 border border-white/10 space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-2">
+                          OpenAI API Key
+                        </label>
+                        <div className="flex gap-3">
+                          <input
+                            type="password"
+                            value={settings.vlm.openai_api_key || ''}
+                            onChange={(e) =>
+                              setSettings({
+                                ...settings,
+                                vlm: { ...settings.vlm, openai_api_key: e.target.value },
+                              })
+                            }
+                            className="input flex-1"
+                            placeholder="sk-..."
+                          />
+                          <button
+                            onClick={() => testOpenAIConnection(settings.vlm.openai_api_key || '', settings.vlm.openai_base_url)}
+                            disabled={isTestingProvider}
+                            className="btn-secondary px-4 flex items-center gap-2"
+                          >
+                            {isTestingProvider && openaiStatus === 'checking' ? (
+                              <ArrowPathIcon className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <ArrowPathIcon className="w-4 h-4" />
+                            )}
+                            Test
+                          </button>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-2">
+                          Custom Base URL (Optional)
+                        </label>
+                        <input
+                          type="text"
+                          value={settings.vlm.openai_base_url || ''}
+                          onChange={(e) =>
                             setSettings({
                               ...settings,
-                              vlm: { ...settings.vlm, model: model },
+                              vlm: { ...settings.vlm, openai_base_url: e.target.value },
                             })
                           }
-                          className={`p-3 rounded-xl text-left transition-all border ${
-                            settings.vlm.model === model
-                              ? 'bg-primary-500/20 border-primary-500/50 text-primary-400'
-                              : 'bg-white/5 border-white/10 text-gray-300 hover:border-white/20 hover:bg-white/10'
-                          }`}
+                          className="input"
+                          placeholder="https://api.openai.com/v1 (default)"
+                        />
+                        <p className="text-xs text-gray-500 mt-1">
+                          For OpenAI-compatible APIs like Azure OpenAI, OpenRouter, etc.
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* OpenAI Model Selection */}
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <label className="block text-sm font-medium text-gray-400">
+                          Select Model
+                        </label>
+                        {openaiStatus === 'online' && openaiModels.length > 0 && (
+                          <span className="text-xs text-green-400">
+                            {openaiModels.length} models fetched
+                          </span>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                        {(openaiModels.length > 0 ? openaiModels : openaiModelOptions).map((model) => (
+                          <button
+                            key={model}
+                            onClick={() =>
+                              setSettings({
+                                ...settings,
+                                vlm: { ...settings.vlm, openai_model: model },
+                              })
+                            }
+                            className={`p-3 rounded-xl text-left transition-all border ${
+                              settings.vlm.openai_model === model
+                                ? 'bg-primary-500/20 border-primary-500/50 text-primary-400'
+                                : 'bg-white/5 border-white/10 text-gray-300 hover:border-white/20 hover:bg-white/10'
+                            }`}
+                          >
+                            <p className="font-medium truncate">{model}</p>
+                            <p className="text-xs text-gray-500 mt-1">
+                              {model.includes('4o') || model.includes('vision') ? '👁️ Vision' : 
+                               model.includes('o1') || model.includes('o3') ? '🧠 Reasoning' : 
+                               model.includes('turbo') ? '⚡ Fast' : '💬 Chat'}
+                            </p>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {/* Gemini Settings */}
+                {settings.vlm.provider === 'gemini' && (
+                  <>
+                    <div className="p-4 rounded-xl bg-white/5 border border-white/10">
+                      <label className="block text-sm font-medium text-gray-300 mb-2">
+                        Gemini API Key
+                      </label>
+                      <div className="flex gap-3">
+                        <input
+                          type="password"
+                          value={settings.vlm.gemini_api_key || ''}
+                          onChange={(e) =>
+                            setSettings({
+                              ...settings,
+                              vlm: { ...settings.vlm, gemini_api_key: e.target.value },
+                            })
+                          }
+                          className="input flex-1"
+                          placeholder="AIza..."
+                        />
+                        <button
+                          onClick={() => testGeminiConnection(settings.vlm.gemini_api_key || '')}
+                          disabled={isTestingProvider}
+                          className="btn-secondary px-4 flex items-center gap-2"
                         >
-                          <p className="font-medium truncate">{model.split(':')[0]}</p>
-                          <p className="text-xs text-gray-500 mt-1">
-                            {model.includes(':') ? model.split(':')[1] : 'latest'}
-                          </p>
+                          {isTestingProvider && geminiStatus === 'checking' ? (
+                            <ArrowPathIcon className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <ArrowPathIcon className="w-4 h-4" />
+                          )}
+                          Test
                         </button>
-                      ))}
+                      </div>
+                      <p className="text-xs text-gray-500 mt-2">
+                        Get your API key from <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" className="text-primary-400 hover:underline">Google AI Studio</a>
+                      </p>
                     </div>
-                  ) : (
-                    <div className="p-6 rounded-xl bg-white/5 border border-white/10 text-center">
-                      {ollamaStatus === 'checking' ? (
-                        <div className="flex flex-col items-center gap-2">
-                          <ArrowPathIcon className="w-8 h-8 text-gray-500 animate-spin" />
-                          <p className="text-gray-400">Loading models...</p>
-                        </div>
-                      ) : (
-                        <div className="flex flex-col items-center gap-2">
-                          <ExclamationCircleIcon className="w-8 h-8 text-gray-500" />
-                          <p className="text-gray-400">No models found</p>
-                          <p className="text-sm text-gray-500">
-                            Check if Ollama is running at the specified URL
-                          </p>
-                        </div>
-                      )}
+
+                    {/* Gemini Model Selection */}
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <label className="block text-sm font-medium text-gray-400">
+                          Select Model
+                        </label>
+                        {geminiStatus === 'online' && geminiModels.length > 0 && (
+                          <span className="text-xs text-green-400">
+                            {geminiModels.length} models fetched
+                          </span>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                        {(geminiModels.length > 0 ? geminiModels : geminiModelOptions).map((model) => (
+                          <button
+                            key={model}
+                            onClick={() =>
+                              setSettings({
+                                ...settings,
+                                vlm: { ...settings.vlm, gemini_model: model },
+                              })
+                            }
+                            className={`p-3 rounded-xl text-left transition-all border ${
+                              settings.vlm.gemini_model === model
+                                ? 'bg-primary-500/20 border-primary-500/50 text-primary-400'
+                                : 'bg-white/5 border-white/10 text-gray-300 hover:border-white/20 hover:bg-white/10'
+                            }`}
+                          >
+                            <p className="font-medium truncate">{model.replace('gemini-', '').replace('models/', '')}</p>
+                            <p className="text-xs text-gray-500 mt-1">
+                              {model.includes('2.0') ? '🚀 Latest' :
+                               model.includes('flash') ? '⚡ Fast' : 
+                               model.includes('pro') ? '🎯 Advanced' : 
+                               model.includes('vision') ? '👁️ Vision' : '💬 Standard'}
+                            </p>
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                  )}
-                </div>
+                  </>
+                )}
 
                 {/* Auto-Summarize Toggle */}
                 <div className="flex items-center justify-between p-4 rounded-xl bg-white/5 border border-white/10">

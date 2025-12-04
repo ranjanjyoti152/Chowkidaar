@@ -18,7 +18,7 @@ from app.schemas.chat import (
 )
 from app.models.camera import Camera
 from app.api.deps import get_current_user
-from app.services.ollama_vlm import get_vlm_service
+from app.services.vlm_service import get_unified_vlm_service
 
 router = APIRouter(prefix="/assistant", tags=["AI Assistant"])
 
@@ -30,13 +30,21 @@ async def configure_vlm_from_settings(user_id: int, db: AsyncSession):
     )
     settings = result.scalar_one_or_none()
     
-    vlm_service = await get_vlm_service()
+    vlm_service = get_unified_vlm_service()
     
     if settings:
+        # Configure based on selected provider
+        provider = settings.vlm_provider or "ollama"
+        
         vlm_service.configure(
-            base_url=settings.vlm_url or "http://localhost:11434",
-            vlm_model=settings.vlm_model or "gemma3:4b",
-            chat_model=settings.vlm_model or "gemma3:4b"
+            provider=provider,
+            ollama_url=settings.vlm_url or "http://localhost:11434",
+            ollama_model=settings.vlm_model or "gemma3:4b",
+            openai_api_key=getattr(settings, 'openai_api_key', None),
+            openai_model=getattr(settings, 'openai_model', 'gpt-4o'),
+            openai_base_url=getattr(settings, 'openai_base_url', None),
+            gemini_api_key=getattr(settings, 'gemini_api_key', None),
+            gemini_model=getattr(settings, 'gemini_model', 'gemini-2.0-flash-exp')
         )
     
     return vlm_service

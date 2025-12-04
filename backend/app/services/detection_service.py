@@ -16,7 +16,7 @@ from app.core.database import AsyncSessionLocal
 from sqlalchemy import select, update
 from app.services.yolo_detector import get_detector
 from app.services.stream_handler import get_stream_manager
-from app.services.ollama_vlm import get_vlm_service
+from app.services.vlm_service import get_unified_vlm_service
 from app.services.notification_service import send_event_notification
 from app.models.event import Event, EventType, EventSeverity
 from app.models.camera import Camera
@@ -123,16 +123,22 @@ class DetectionService:
         await detector.load_model(model_name, device)
         detector.confidence_threshold = confidence
         
-        # Configure Ollama VLM with user's settings
+        # Configure VLM with user's settings
         vlm_settings = await self._get_vlm_settings(user_id)
         if vlm_settings:
-            vlm = await get_vlm_service()
+            vlm = get_unified_vlm_service()
+            provider = vlm_settings.get("provider", "ollama")
             vlm.configure(
-                base_url=vlm_settings.get("url", "http://localhost:11434"),
-                vlm_model=vlm_settings.get("model", "llava"),
-                chat_model=vlm_settings.get("model", "llava")
+                provider=provider,
+                ollama_url=vlm_settings.get("url", "http://localhost:11434"),
+                ollama_model=vlm_settings.get("model", "llava"),
+                openai_api_key=vlm_settings.get("openai_api_key"),
+                openai_model=vlm_settings.get("openai_model", "gpt-4o"),
+                openai_base_url=vlm_settings.get("openai_base_url"),
+                gemini_api_key=vlm_settings.get("gemini_api_key"),
+                gemini_model=vlm_settings.get("gemini_model", "gemini-2.0-flash-exp")
             )
-            logger.info(f"VLM configured: {vlm_settings.get('url')} with model {vlm_settings.get('model')}")
+            logger.info(f"VLM configured: provider={provider}")
         
         logger.info(f"🔍 Started detection loop for camera {camera_id} with model {model_name} on {device}")
         
@@ -276,12 +282,18 @@ class DetectionService:
                 
                 if user_settings:
                     return {
+                        "provider": getattr(user_settings, 'vlm_provider', 'ollama'),
                         "url": user_settings.vlm_url,
                         "model": user_settings.vlm_model,
                         "auto_summarize": user_settings.auto_summarize,
                         "summarize_delay": user_settings.summarize_delay,
                         "safety_scan_enabled": getattr(user_settings, 'vlm_safety_scan_enabled', True),
-                        "safety_scan_interval": getattr(user_settings, 'vlm_safety_scan_interval', 30)
+                        "safety_scan_interval": getattr(user_settings, 'vlm_safety_scan_interval', 30),
+                        "openai_api_key": getattr(user_settings, 'openai_api_key', None),
+                        "openai_model": getattr(user_settings, 'openai_model', 'gpt-4o'),
+                        "openai_base_url": getattr(user_settings, 'openai_base_url', None),
+                        "gemini_api_key": getattr(user_settings, 'gemini_api_key', None),
+                        "gemini_model": getattr(user_settings, 'gemini_model', 'gemini-2.0-flash-exp')
                     }
                 return None
         except Exception as e:
@@ -410,15 +422,21 @@ class DetectionService:
         try:
             # Get VLM settings and configure
             vlm_settings = await self._get_vlm_settings(user_id)
-            vlm = await get_vlm_service()
+            vlm = get_unified_vlm_service()
             
             if vlm_settings:
+                provider = vlm_settings.get("provider", "ollama")
                 vlm.configure(
-                    base_url=vlm_settings.get("url", "http://localhost:11434"),
-                    vlm_model=vlm_settings.get("model", "gemma3:4b"),
-                    chat_model=vlm_settings.get("model", "gemma3:4b")
+                    provider=provider,
+                    ollama_url=vlm_settings.get("url", "http://localhost:11434"),
+                    ollama_model=vlm_settings.get("model", "gemma3:4b"),
+                    openai_api_key=vlm_settings.get("openai_api_key"),
+                    openai_model=vlm_settings.get("openai_model", "gpt-4o"),
+                    openai_base_url=vlm_settings.get("openai_base_url"),
+                    gemini_api_key=vlm_settings.get("gemini_api_key"),
+                    gemini_model=vlm_settings.get("gemini_model", "gemini-2.0-flash-exp")
                 )
-                logger.debug(f"VLM configured for summary: {vlm_settings.get('url')} model: {vlm_settings.get('model')}")
+                logger.debug(f"VLM configured for summary: provider={provider}")
             
             # Fetch camera context for intelligent severity assessment
             camera_context = ""
@@ -533,7 +551,15 @@ SEVERITY RULES:
 RESPOND IN THIS EXACT FORMAT:
 SUMMARY: [Describe what you ACTUALLY see. Be specific about colors, positions, actions]
 THREAT_LEVEL: [low/medium/high/critical]
-EVENT_TYPE: [fire_detected/smoke_detected/intrusion/suspicious/theft_attempt/person_detected/vehicle_detected/delivery/visitor]"""
+EVENT_TYPE: [Choose based on what's detected:
+  - person_detected: If a person is visible
+  - vehicle_detected: If car/truck/motorcycle visible
+  - animal_detected: If animal visible
+  - object_detected: For furniture, electronics, objects (chair, tv, laptop, etc.)
+  - fire_detected/smoke_detected: For fire/smoke
+  - intrusion/suspicious/theft_attempt: For security threats
+  - delivery/visitor: For guests/delivery
+  - motion_detected: Default if none of the above]"""
             
             # Generate analysis using describe_frame
             logger.debug(f"Calling VLM for event summary with model: {vlm_settings.get('model') if vlm_settings else 'default'}")
@@ -623,6 +649,7 @@ EVENT_TYPE: [fire_detected/smoke_detected/intrusion/suspicious/theft_attempt/per
                     'person_detected': EventType.person_detected,
                     'vehicle_detected': EventType.vehicle_detected,
                     'animal_detected': EventType.animal_detected,
+                    'object_detected': EventType.object_detected,
                     'motion_detected': EventType.motion_detected,
                     'fire_detected': EventType.fire_detected,
                     'smoke_detected': EventType.smoke_detected,
@@ -690,7 +717,15 @@ EVENT_TYPE: [fire_detected/smoke_detected/intrusion/suspicious/theft_attempt/per
         if any(c in classes for c in ["dog", "cat", "bird", "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe"]):
             return EventType.animal_detected
         
-        # For all other objects (chair, tv, laptop, etc.) - just motion/object detected
+        # Common objects like furniture, electronics - classify as object_detected
+        common_objects = ["chair", "couch", "sofa", "bed", "dining table", "table", "tv", "television",
+                          "laptop", "computer", "monitor", "keyboard", "mouse", "cell phone", "phone",
+                          "book", "clock", "vase", "scissors", "teddy bear", "toothbrush", "remote",
+                          "refrigerator", "oven", "microwave", "toaster", "sink", "bottle", "cup"]
+        if any(c in classes for c in common_objects):
+            return EventType.object_detected
+        
+        # For anything else - motion detected
         return EventType.motion_detected
     
     def _get_severity(self, detections: List[dict]) -> EventSeverity:
@@ -735,11 +770,17 @@ EVENT_TYPE: [fire_detected/smoke_detected/intrusion/suspicious/theft_attempt/per
             if not vlm_settings.get("safety_scan_enabled", True):
                 return  # Safety scan disabled by user
             
-            vlm = await get_vlm_service()
+            vlm = get_unified_vlm_service()
+            provider = vlm_settings.get("provider", "ollama")
             vlm.configure(
-                base_url=vlm_settings.get("url", "http://localhost:11434"),
-                vlm_model=vlm_settings.get("model", "gemma3:4b"),
-                chat_model=vlm_settings.get("model", "gemma3:4b")
+                provider=provider,
+                ollama_url=vlm_settings.get("url", "http://localhost:11434"),
+                ollama_model=vlm_settings.get("model", "gemma3:4b"),
+                openai_api_key=vlm_settings.get("openai_api_key"),
+                openai_model=vlm_settings.get("openai_model", "gpt-4o"),
+                openai_base_url=vlm_settings.get("openai_base_url"),
+                gemini_api_key=vlm_settings.get("gemini_api_key"),
+                gemini_model=vlm_settings.get("gemini_model", "gemini-2.0-flash-exp")
             )
             
             # Fetch camera context for safety scan

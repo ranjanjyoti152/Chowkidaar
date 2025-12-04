@@ -15,6 +15,7 @@ class EventType(str, enum.Enum):
     person_detected = "person_detected"
     vehicle_detected = "vehicle_detected"
     animal_detected = "animal_detected"
+    object_detected = "object_detected"  # For chairs, TVs, laptops, etc.
     motion_detected = "motion_detected"
     
     # Intelligent classifications (LLM decides)

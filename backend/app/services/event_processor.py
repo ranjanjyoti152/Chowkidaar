@@ -13,7 +13,7 @@ import uuid
 from app.core.config import settings
 from app.services.yolo_detector import YOLODetector, get_detector
 from app.services.stream_handler import StreamManager, get_stream_manager
-from app.services.ollama_vlm import OllamaVLMService, get_vlm_service
+from app.services.vlm_service import vlm_service as unified_vlm_service
 from app.models.event import EventType, EventSeverity
 
 
@@ -22,7 +22,6 @@ class EventProcessor:
     
     def __init__(self):
         self._detector: Optional[YOLODetector] = None
-        self._vlm_service: Optional[OllamaVLMService] = None
         self._stream_manager: Optional[StreamManager] = None
         self._running = False
         self._event_callbacks: List = []
@@ -38,9 +37,8 @@ class EventProcessor:
     async def initialize(self):
         """Initialize all required services"""
         self._detector = await get_detector()
-        self._vlm_service = await get_vlm_service()
         self._stream_manager = get_stream_manager()
-        logger.info("Event processor initialized")
+        logger.info("Event processor initialized (using unified VLM service)")
     
     def add_event_callback(self, callback):
         """Add callback for new events"""
@@ -86,19 +84,18 @@ class EventProcessor:
         frame_path = await self._save_frame(frame, camera_id)
         thumbnail_path = await self._save_thumbnail(frame, camera_id)
         
-        # Generate VLM summary (async)
+        # Generate VLM summary using unified service (async)
         summary = None
-        if self._vlm_service:
-            try:
-                summary = await self._vlm_service.generate_event_summary(
-                    frame=frame,
-                    event_type=event_type.value,
-                    detected_objects=filtered,
-                    camera_name=camera_name,
-                    timestamp=datetime.now()
-                )
-            except Exception as e:
-                logger.error(f"VLM summary error: {e}")
+        try:
+            summary = await unified_vlm_service.generate_event_summary(
+                frame=frame,
+                event_type=event_type.value,
+                detected_objects=filtered,
+                camera_name=camera_name,
+                timestamp=datetime.now()
+            )
+        except Exception as e:
+            logger.error(f"VLM summary error: {e}")
         
         # Create event data
         event_data = {
@@ -265,10 +262,7 @@ class EventProcessor:
             if frame is None:
                 return None
             
-            if self._vlm_service is None:
-                return None
-            
-            return await self._vlm_service.generate_event_summary(
+            return await unified_vlm_service.generate_event_summary(
                 frame=frame,
                 event_type=event_type,
                 detected_objects=detected_objects,

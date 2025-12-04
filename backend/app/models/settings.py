@@ -29,9 +29,23 @@ class UserSettings(Base):
     detection_device: Mapped[str] = mapped_column(String(50), default="cuda")
     enabled_classes: Mapped[list] = mapped_column(JSON, default=list)
     
-    # VLM settings
+    # VLM provider settings
+    vlm_provider: Mapped[str] = mapped_column(String(50), default="ollama")  # 'ollama', 'openai', 'gemini'
+    
+    # Ollama settings
     vlm_model: Mapped[str] = mapped_column(String(100), default="gemma3:4b")
     vlm_url: Mapped[str] = mapped_column(String(255), default="http://localhost:11434")
+    
+    # OpenAI settings
+    openai_api_key: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    openai_model: Mapped[str] = mapped_column(String(100), default="gpt-4o")
+    openai_base_url: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    
+    # Gemini settings
+    gemini_api_key: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    gemini_model: Mapped[str] = mapped_column(String(100), default="gemini-2.0-flash-exp")
+    
+    # Common VLM settings
     auto_summarize: Mapped[bool] = mapped_column(default=True)
     summarize_delay: Mapped[int] = mapped_column(default=5)
     vlm_safety_scan_enabled: Mapped[bool] = mapped_column(default=True)

@@ -4,6 +4,7 @@ Chowkidaar NVR - Settings Routes
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from loguru import logger
 
 from app.core.database import get_db
 from app.models.user import User
@@ -14,6 +15,7 @@ from app.schemas.settings import (
     TelegramSettings, EmailSettings
 )
 from app.api.deps import get_current_user
+from app.services.vlm_service import vlm_service
 
 router = APIRouter(prefix="/settings", tags=["Settings"])
 
@@ -47,8 +49,14 @@ async def get_settings(
             inference_device=settings.detection_device
         ),
         vlm=VLMSettings(
+            provider=getattr(settings, 'vlm_provider', 'ollama'),
             model=settings.vlm_model,
             ollama_url=settings.vlm_url,
+            openai_api_key=getattr(settings, 'openai_api_key', None),
+            openai_model=getattr(settings, 'openai_model', 'gpt-4o'),
+            openai_base_url=getattr(settings, 'openai_base_url', None),
+            gemini_api_key=getattr(settings, 'gemini_api_key', None),
+            gemini_model=getattr(settings, 'gemini_model', 'gemini-2.0-flash-exp'),
             auto_summarize=settings.auto_summarize,
             summarize_delay_seconds=settings.summarize_delay
         ),
@@ -112,12 +120,31 @@ async def update_settings(
     
     # Update VLM settings
     if settings_update.vlm:
+        settings.vlm_provider = settings_update.vlm.provider
         settings.vlm_model = settings_update.vlm.model
         settings.vlm_url = settings_update.vlm.ollama_url
+        settings.openai_api_key = settings_update.vlm.openai_api_key
+        settings.openai_model = settings_update.vlm.openai_model
+        settings.openai_base_url = settings_update.vlm.openai_base_url
+        settings.gemini_api_key = settings_update.vlm.gemini_api_key
+        settings.gemini_model = settings_update.vlm.gemini_model
         settings.auto_summarize = settings_update.vlm.auto_summarize
         settings.summarize_delay = settings_update.vlm.summarize_delay_seconds
         settings.vlm_safety_scan_enabled = settings_update.vlm.safety_scan_enabled
         settings.vlm_safety_scan_interval = settings_update.vlm.safety_scan_interval
+        
+        # Configure VLM service system-wide with new settings
+        vlm_service.configure(
+            provider=settings_update.vlm.provider,
+            ollama_url=settings_update.vlm.ollama_url,
+            ollama_model=settings_update.vlm.model,
+            openai_api_key=settings_update.vlm.openai_api_key,
+            openai_model=settings_update.vlm.openai_model,
+            openai_base_url=settings_update.vlm.openai_base_url,
+            gemini_api_key=settings_update.vlm.gemini_api_key,
+            gemini_model=settings_update.vlm.gemini_model
+        )
+        logger.info(f"VLM service configured: provider={settings_update.vlm.provider}")
     
     # Update storage settings
     if settings_update.storage:
@@ -166,8 +193,14 @@ async def update_settings(
             inference_device=settings.detection_device
         ),
         vlm=VLMSettings(
+            provider=getattr(settings, 'vlm_provider', 'ollama'),
             model=settings.vlm_model,
             ollama_url=settings.vlm_url,
+            openai_api_key=getattr(settings, 'openai_api_key', None),
+            openai_model=getattr(settings, 'openai_model', 'gpt-4o'),
+            openai_base_url=getattr(settings, 'openai_base_url', None),
+            gemini_api_key=getattr(settings, 'gemini_api_key', None),
+            gemini_model=getattr(settings, 'gemini_model', 'gemini-2.0-flash-exp'),
             auto_summarize=settings.auto_summarize,
             summarize_delay_seconds=settings.summarize_delay,
             safety_scan_enabled=getattr(settings, 'vlm_safety_scan_enabled', True),

@@ -14,8 +14,23 @@ class DetectionSettings(BaseModel):
 
 
 class VLMSettings(BaseModel):
+    # Provider selection: 'ollama', 'openai', 'gemini'
+    provider: str = "ollama"
+    
+    # Ollama settings
     model: str = "gemma3:4b"
     ollama_url: str = "http://localhost:11434"
+    
+    # OpenAI settings
+    openai_api_key: Optional[str] = None
+    openai_model: str = "gpt-4o"
+    openai_base_url: Optional[str] = None  # For OpenAI-compatible APIs
+    
+    # Gemini settings
+    gemini_api_key: Optional[str] = None
+    gemini_model: str = "gemini-2.0-flash-exp"
+    
+    # Common settings
     auto_summarize: bool = True
     summarize_delay_seconds: int = 5
     safety_scan_enabled: bool = True
