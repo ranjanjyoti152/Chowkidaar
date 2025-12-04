@@ -5,9 +5,11 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, or_
 from datetime import datetime, timedelta
 from pathlib import Path
+from pydantic import BaseModel
+from loguru import logger
 
 from app.core.database import get_db
 from app.core.config import settings
@@ -20,8 +22,14 @@ from app.schemas.event import (
 )
 from app.api.deps import get_current_user
 from app.services.event_processor import get_event_processor
+from app.services.ollama_vlm import get_vlm_service
+from app.models.settings import UserSettings
 
 router = APIRouter(prefix="/events", tags=["Events"])
+
+
+class SearchRequest(BaseModel):
+    query: str
 
 
 @router.get("", response_model=List[EventWithCamera])
@@ -32,12 +40,13 @@ async def list_events(
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
     is_acknowledged: Optional[bool] = None,
+    sort_order: Optional[str] = "newest",  # newest or oldest
     skip: int = 0,
     limit: int = 50,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """List events with filters"""
+    """List events with filters and sorting"""
     query = (
         select(Event, Camera.name, Camera.location)
         .join(Camera)
@@ -58,7 +67,13 @@ async def list_events(
     if is_acknowledged is not None:
         query = query.where(Event.is_acknowledged == is_acknowledged)
     
-    query = query.order_by(Event.timestamp.desc()).offset(skip).limit(limit)
+    # Apply sorting
+    if sort_order == "oldest":
+        query = query.order_by(Event.timestamp.asc())
+    else:  # default: newest first
+        query = query.order_by(Event.timestamp.desc())
+    
+    query = query.offset(skip).limit(limit)
     
     result = await db.execute(query)
     rows = result.all()
@@ -71,6 +86,146 @@ async def list_events(
         events_with_camera.append(EventWithCamera(**event_dict))
     
     return events_with_camera
+
+
+@router.post("/search", response_model=List[EventWithCamera])
+async def search_events(
+    request: SearchRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    AI-powered semantic search for events using VLM.
+    Search using natural language like:
+    - "red car with black hoodie person"
+    - "person talking on phone"
+    - "delivery guy at door"
+    """
+    search_query = request.query.strip()
+    if not search_query:
+        raise HTTPException(status_code=400, detail="Search query cannot be empty")
+    
+    logger.info(f"🔍 AI Search query: '{search_query}' by user {current_user.id}")
+    
+    # Get user's VLM settings
+    result = await db.execute(
+        select(UserSettings).where(UserSettings.user_id == current_user.id)
+    )
+    user_settings = result.scalar_one_or_none()
+    
+    if not user_settings or not user_settings.vlm_url:
+        raise HTTPException(status_code=400, detail="VLM not configured. Please configure VLM in Settings.")
+    
+    # Get recent events with summaries (last 7 days, max 200)
+    week_ago = datetime.now() - timedelta(days=7)
+    events_result = await db.execute(
+        select(Event, Camera.name, Camera.location)
+        .join(Camera)
+        .where(Event.user_id == current_user.id)
+        .where(Event.timestamp >= week_ago)
+        .where(Event.summary.isnot(None))
+        .order_by(Event.timestamp.desc())
+        .limit(200)
+    )
+    all_events = events_result.all()
+    
+    if not all_events:
+        return []
+    
+    # Configure VLM
+    vlm = await get_vlm_service()
+    vlm.configure(
+        base_url=user_settings.vlm_url,
+        vlm_model=user_settings.vlm_model,
+        chat_model=user_settings.vlm_model
+    )
+    
+    # Build event summaries for VLM analysis
+    event_data = []
+    for event, camera_name, camera_location in all_events:
+        summary = event.summary or ""
+        # Add detected objects info
+        objects_info = ""
+        if event.detected_objects:
+            objects = [obj.get("class_name", "") for obj in event.detected_objects if isinstance(obj, dict)]
+            objects_info = f" [Detected: {', '.join(objects)}]" if objects else ""
+        
+        event_data.append({
+            "id": event.id,
+            "summary": summary[:300] + objects_info,
+            "event": event,
+            "camera_name": camera_name,
+            "camera_location": camera_location
+        })
+    
+    # Process in batches of 30 events for better accuracy
+    matched_event_ids = set()
+    batch_size = 30
+    
+    for i in range(0, min(len(event_data), 150), batch_size):
+        batch = event_data[i:i + batch_size]
+        
+        # Create VLM prompt
+        event_list = "\n".join([
+            f"ID:{e['id']} - {e['summary'][:200]}"
+            for e in batch
+        ])
+        
+        prompt = f"""You are a precise search assistant for a security camera system.
+
+USER'S SEARCH QUERY: "{search_query}"
+
+TASK: Find events that ACTUALLY MATCH the search query. Be STRICT - only return events that genuinely match.
+
+EVENT LIST:
+{event_list}
+
+RULES:
+1. ONLY return event IDs that TRULY match the search query
+2. If query says "person wearing watch" - only match if summary mentions watch
+3. If query says "red car" - only match if summary mentions red car specifically
+4. DO NOT match events just because they have "person" if query asks for specific details
+5. If NOTHING matches the query, return: NONE
+
+RESPOND WITH ONLY THE MATCHING EVENT IDs (comma-separated numbers) OR "NONE":"""
+
+        try:
+            response = await vlm.chat(prompt)
+            
+            if response and "NONE" not in response.upper():
+                # Parse event IDs
+                import re
+                ids = re.findall(r'\b(\d+)\b', response)
+                for id_str in ids:
+                    event_id = int(id_str)
+                    # Verify it's a valid event ID from our batch
+                    if any(e["id"] == event_id for e in batch):
+                        matched_event_ids.add(event_id)
+                
+                logger.debug(f"VLM batch {i//batch_size + 1}: Found {len(ids)} matches")
+        except Exception as e:
+            logger.warning(f"VLM search batch failed: {e}")
+            continue
+    
+    # If VLM found matches, use those
+    if matched_event_ids:
+        logger.info(f"✅ VLM found {len(matched_event_ids)} matching events")
+        
+        # Get matched events in order
+        events_with_camera = []
+        for ed in event_data:
+            if ed["id"] in matched_event_ids:
+                event = ed["event"]
+                event_dict = EventResponse.model_validate(event).model_dump()
+                event_dict["camera_name"] = ed["camera_name"]
+                event_dict["camera_location"] = ed["camera_location"]
+                events_with_camera.append(EventWithCamera(**event_dict))
+        
+        return events_with_camera
+    
+    # VLM said no matches - return empty (don't show unrelated results)
+    logger.info(f"❌ No events match query: '{search_query}'")
+    return []
 
 
 @router.get("/stats", response_model=EventStats)

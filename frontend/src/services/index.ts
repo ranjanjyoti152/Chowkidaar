@@ -140,6 +140,7 @@ export const eventApi = {
     start_date?: string
     end_date?: string
     is_acknowledged?: boolean
+    sort_order?: 'newest' | 'oldest'
     skip?: number
     limit?: number
   }): Promise<EventWithCamera[]> => {
@@ -175,6 +176,12 @@ export const eventApi = {
   
   regenerateSummary: async (id: number): Promise<Event> => {
     const response = await api.post(`/events/${id}/regenerate-summary`)
+    return response.data
+  },
+  
+  // AI-powered semantic search
+  searchEvents: async (query: string): Promise<EventWithCamera[]> => {
+    const response = await api.post('/events/search', { query })
     return response.data
   },
   

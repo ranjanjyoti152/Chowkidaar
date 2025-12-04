@@ -277,6 +277,10 @@ function CameraModal({
     stream_url: camera?.stream_url || '',
     camera_type: camera?.camera_type || 'rtsp',
     location: camera?.location || '',
+    location_type: camera?.location_type || '',
+    expected_activity: camera?.expected_activity || '',
+    unexpected_activity: camera?.unexpected_activity || '',
+    normal_conditions: camera?.normal_conditions || '',
     fps: camera?.fps || 15,
     detection_enabled: camera?.detection_enabled ?? true,
     is_enabled: camera?.is_enabled ?? true,
@@ -368,6 +372,76 @@ function CameraModal({
               value={formData.description}
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
             />
+          </div>
+
+          {/* Context-Aware Detection Settings */}
+          <div className="border border-primary-500/30 rounded-lg p-4 bg-primary-500/5">
+            <h3 className="text-sm font-semibold text-primary-300 mb-3 flex items-center gap-2">
+              🧠 AI Context Settings
+              <span className="text-xs font-normal text-gray-400">(helps AI decide severity)</span>
+            </h3>
+            
+            <div className="space-y-3">
+              <div>
+                <label className="label text-xs">Location Type</label>
+                <select
+                  className="input"
+                  value={formData.location_type}
+                  onChange={(e) => setFormData({ ...formData, location_type: e.target.value })}
+                >
+                  <option value="">Select location type...</option>
+                  <option value="office">🏢 Office / Workspace</option>
+                  <option value="kitchen">🍳 Kitchen</option>
+                  <option value="entrance">🚪 Entrance / Door</option>
+                  <option value="parking">🚗 Parking Area</option>
+                  <option value="warehouse">📦 Warehouse / Storage</option>
+                  <option value="bedroom">🛏️ Bedroom</option>
+                  <option value="living_room">🛋️ Living Room</option>
+                  <option value="lobby">🏛️ Lobby / Reception</option>
+                  <option value="corridor">🚶 Corridor / Hallway</option>
+                  <option value="outdoor">🌳 Outdoor / Garden</option>
+                  <option value="server_room">🖥️ Server Room</option>
+                  <option value="lab">🔬 Lab / Workshop</option>
+                  <option value="retail">🛒 Retail / Shop</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="label text-xs">Expected Activity ✅</label>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="e.g., 'people working on computers', 'cooking with fire and stove'"
+                  value={formData.expected_activity}
+                  onChange={(e) => setFormData({ ...formData, expected_activity: e.target.value })}
+                />
+                <p className="text-xs text-gray-500 mt-1">What normally happens here? (LOW severity)</p>
+              </div>
+
+              <div>
+                <label className="label text-xs">Unexpected Activity ⚠️</label>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="e.g., 'running', 'fighting', 'strangers at night', 'fire outside stove'"
+                  value={formData.unexpected_activity}
+                  onChange={(e) => setFormData({ ...formData, unexpected_activity: e.target.value })}
+                />
+                <p className="text-xs text-gray-500 mt-1">What should trigger HIGH alerts?</p>
+              </div>
+
+              <div>
+                <label className="label text-xs">Normal Conditions</label>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="e.g., '5-10 people during work hours', 'fire on stove is normal', 'empty at night'"
+                  value={formData.normal_conditions}
+                  onChange={(e) => setFormData({ ...formData, normal_conditions: e.target.value })}
+                />
+                <p className="text-xs text-gray-500 mt-1">What should NOT trigger high alerts?</p>
+              </div>
+            </div>
           </div>
 
           <div className="flex items-center gap-4">

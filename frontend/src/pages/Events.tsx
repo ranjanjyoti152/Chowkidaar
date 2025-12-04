@@ -9,6 +9,9 @@ import {
   TrashIcon,
   ArrowPathIcon,
   XMarkIcon,
+  MagnifyingGlassIcon,
+  ArrowsUpDownIcon,
+  SparklesIcon,
 } from '@heroicons/react/24/outline'
 import { eventApi } from '../services'
 import { useAuthStore } from '../store/authStore'
@@ -67,17 +70,22 @@ export default function Events() {
     event_type: '',
     is_acknowledged: '',
   })
+  const [sortOrder, setSortOrder] = useState<'newest' | 'oldest'>('newest')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [isSearching, setIsSearching] = useState(false)
+  const [searchResults, setSearchResults] = useState<EventWithCamera[] | null>(null)
   const [selectedEvent, setSelectedEvent] = useState<EventWithCamera | null>(null)
   const queryClient = useQueryClient()
 
   const { data: events, isLoading } = useQuery({
-    queryKey: ['events', filters],
+    queryKey: ['events', filters, sortOrder],
     queryFn: () =>
       eventApi.listEvents({
         severity: filters.severity || undefined,
         event_type: filters.event_type || undefined,
         is_acknowledged: filters.is_acknowledged ? filters.is_acknowledged === 'true' : undefined,
-        limit: 50,
+        sort_order: sortOrder,
+        limit: 100,
       }),
   })
 
@@ -120,6 +128,40 @@ export default function Events() {
     },
   })
 
+  // AI Search handler
+  const handleAISearch = async () => {
+    if (!searchQuery.trim()) {
+      setSearchResults(null)
+      return
+    }
+    
+    setIsSearching(true)
+    try {
+      const results = await eventApi.searchEvents(searchQuery)
+      setSearchResults(results)
+      if (results.length === 0) {
+        toast('No events found matching your search', { icon: '🔍' })
+      } else {
+        toast.success(`Found ${results.length} matching events`)
+      }
+    } catch (error) {
+      console.error('Search error:', error)
+      toast.error('Search failed. Please try again.')
+      setSearchResults(null)
+    } finally {
+      setIsSearching(false)
+    }
+  }
+
+  // Clear search
+  const clearSearch = () => {
+    setSearchQuery('')
+    setSearchResults(null)
+  }
+
+  // Events to display (search results or regular events)
+  const displayEvents = searchResults !== null ? searchResults : events
+
   return (
     <div className="page-container">
       {/* Header */}
@@ -141,11 +183,74 @@ export default function Events() {
         </div>
       </div>
 
+      {/* AI Search Bar */}
+      <div className="glass-card p-4">
+        <div className="flex items-center gap-3">
+          <div className="relative flex-1">
+            <SparklesIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-primary-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleAISearch()}
+              placeholder="AI Search: 'red car with black hoodie person', 'person talking on phone', 'delivery guy at door'..."
+              className="input pl-10 pr-20 w-full"
+            />
+            {searchQuery && (
+              <button
+                onClick={clearSearch}
+                className="absolute right-12 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
+              >
+                <XMarkIcon className="w-5 h-5" />
+              </button>
+            )}
+          </div>
+          <button
+            onClick={handleAISearch}
+            disabled={isSearching || !searchQuery.trim()}
+            className="btn-primary px-6"
+          >
+            {isSearching ? (
+              <ArrowPathIcon className="w-5 h-5 animate-spin" />
+            ) : (
+              <MagnifyingGlassIcon className="w-5 h-5" />
+            )}
+            Search
+          </button>
+        </div>
+        {searchResults !== null && (
+          <div className="mt-3 flex items-center gap-2">
+            <span className="text-sm text-primary-300">
+              🔍 Showing {searchResults.length} search results for "{searchQuery}"
+            </span>
+            <button
+              onClick={clearSearch}
+              className="text-xs text-gray-400 hover:text-white underline"
+            >
+              Clear search
+            </button>
+          </div>
+        )}
+      </div>
+
       {/* Filters */}
       <div className="glass-card p-4 flex flex-wrap gap-4">
         <div className="flex items-center gap-2">
           <FunnelIcon className="w-5 h-5 text-gray-300" />
           <span className="text-sm text-gray-300">Filters:</span>
+        </div>
+        
+        {/* Sort Order */}
+        <div className="flex items-center gap-2">
+          <ArrowsUpDownIcon className="w-4 h-4 text-gray-400" />
+          <select
+            value={sortOrder}
+            onChange={(e) => setSortOrder(e.target.value as 'newest' | 'oldest')}
+            className="input py-2 w-auto"
+          >
+            <option value="newest">Newest First</option>
+            <option value="oldest">Oldest First</option>
+          </select>
         </div>
         
         <select
@@ -171,6 +276,10 @@ export default function Events() {
           <option value="fire_detected">Fire</option>
           <option value="smoke_detected">Smoke</option>
           <option value="animal_detected">Animal</option>
+          <option value="intrusion">Intrusion</option>
+          <option value="suspicious">Suspicious</option>
+          <option value="delivery">Delivery</option>
+          <option value="visitor">Visitor</option>
         </select>
 
         <select
@@ -186,15 +295,15 @@ export default function Events() {
 
       {/* Events List */}
       <div className="glass-card overflow-hidden">
-        {isLoading ? (
+        {isLoading && !searchResults ? (
           <div className="p-6 space-y-4">
             {[1, 2, 3, 4, 5].map((i) => (
               <div key={i} className="h-20 skeleton" />
             ))}
           </div>
-        ) : events && events.length > 0 ? (
+        ) : displayEvents && displayEvents.length > 0 ? (
           <div className="divide-y divide-white/10">
-            {events.map((event) => (
+            {displayEvents.map((event) => (
                 <motion.div
                 key={event.id}
                 initial={{ opacity: 0 }}

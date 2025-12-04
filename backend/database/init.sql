@@ -98,6 +98,13 @@ CREATE TABLE IF NOT EXISTS cameras (
     resolution_width INTEGER,
     resolution_height INTEGER,
     location VARCHAR(255),
+    
+    -- Context-aware detection settings (helps AI decide severity)
+    location_type VARCHAR(100),              -- office, kitchen, warehouse, entrance, parking, etc.
+    expected_activity TEXT,                   -- "people working on computers", "cooking with fire"
+    unexpected_activity TEXT,                 -- "running", "fighting", "strangers at night"
+    normal_conditions TEXT,                   -- "5-10 people during work hours", "fire on stove is normal"
+    
     owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     created_at TIMESTAMP DEFAULT NOW() NOT NULL,
     updated_at TIMESTAMP DEFAULT NOW() NOT NULL

@@ -90,6 +90,13 @@ class Camera(Base):
     # Location info
     location: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     
+    # Context-aware detection settings
+    # Location type helps VLM understand what's normal for this area
+    location_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # office, kitchen, warehouse, entrance, parking, bedroom, etc.
+    expected_activity: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # "people working on computers", "cooking with fire", "cars parking"
+    unexpected_activity: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # "running", "fighting", "fire in non-kitchen area"
+    normal_conditions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # "5-10 people during work hours", "fire on stove is normal", "empty at night"
+    
     # Owner
     owner_id: Mapped[int] = mapped_column(
         Integer,

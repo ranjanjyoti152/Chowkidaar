@@ -129,6 +129,9 @@ Do not use markdown formatting, bullet points, or asterisks.
 Do not add notes, disclaimers, recommendations, or suggestions."""
             
             # Call Ollama API
+            # Use longer num_predict for custom prompts (like security analysis)
+            max_tokens = 300 if prompt else 150
+            
             response = await client.post(
                 "/api/generate",
                 json={
@@ -138,9 +141,10 @@ Do not add notes, disclaimers, recommendations, or suggestions."""
                     "stream": False,
                     "options": {
                         "temperature": 0.2,
-                        "num_predict": 150
+                        "num_predict": max_tokens
                     }
-                }
+                },
+                timeout=90.0  # Longer timeout for VLM analysis
             )
             
             if response.status_code == 200:

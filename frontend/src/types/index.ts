@@ -50,6 +50,10 @@ export interface Camera {
   stream_url: string
   camera_type: CameraType
   location?: string
+  location_type?: string
+  expected_activity?: string
+  unexpected_activity?: string
+  normal_conditions?: string
   status: CameraStatus
   is_enabled: boolean
   detection_enabled: boolean
@@ -76,6 +80,10 @@ export interface CameraCreate {
   stream_url: string
   camera_type?: CameraType
   location?: string
+  location_type?: string
+  expected_activity?: string
+  unexpected_activity?: string
+  normal_conditions?: string
   username?: string
   password?: string
   is_enabled?: boolean

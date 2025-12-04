@@ -366,7 +366,7 @@ class DetectionService:
                     
                     # Generate summary with VLM and then send notification
                     asyncio.create_task(
-                        self._generate_summary_and_notify(event.id, frame, class_dets, user_id)
+                        self._generate_summary_and_notify(event.id, frame, class_dets, user_id, camera_id)
                     )
                     
             except Exception as e:
@@ -403,7 +403,8 @@ class DetectionService:
         event_id: int, 
         frame: np.ndarray,
         detections: List[dict],
-        user_id: int
+        user_id: int,
+        camera_id: int = None
     ):
         """Generate VLM summary, intelligent severity assessment, and send notification"""
         try:
@@ -418,6 +419,39 @@ class DetectionService:
                     chat_model=vlm_settings.get("model", "gemma3:4b")
                 )
                 logger.debug(f"VLM configured for summary: {vlm_settings.get('url')} model: {vlm_settings.get('model')}")
+            
+            # Fetch camera context for intelligent severity assessment
+            camera_context = ""
+            camera_name = "Unknown Camera"
+            if camera_id:
+                try:
+                    async with AsyncSessionLocal() as db:
+                        from app.models.camera import Camera
+                        result = await db.execute(
+                            select(Camera).where(Camera.id == camera_id)
+                        )
+                        camera = result.scalar_one_or_none()
+                        if camera:
+                            camera_name = camera.name or f"Camera {camera_id}"
+                            if camera.location_type or camera.expected_activity or camera.unexpected_activity or camera.normal_conditions:
+                                camera_context = f"""\n\n📍 CAMERA CONTEXT (VERY IMPORTANT - adjust severity based on this):
+- Camera: {camera_name}
+- Location Type: {camera.location_type or 'Not specified'}
+- Expected Activity (NORMAL → LOW): {camera.expected_activity or 'Not specified'}
+- Unexpected Activity (ALERT → HIGH): {camera.unexpected_activity or 'Not specified'}
+- Normal Conditions: {camera.normal_conditions or 'Not specified'}
+
+⚠️ SEVERITY RULES based on camera context:
+✅ If activity matches "Expected Activity" → LOW severity (normal behavior)
+🚨 If activity matches "Unexpected Activity" → HIGH severity (alert needed!)
+- Example: Kitchen with expected="cooking with fire" → fire on stove = LOW
+- Example: Kitchen with unexpected="fire outside stove area" → fire on floor = HIGH
+- Example: Office with expected="people working" → 10 people typing = LOW
+- Example: Office with unexpected="running, fighting" → people running = HIGH"""
+                            else:
+                                camera_context = f"\n\n📍 Camera: {camera_name} (No context configured - use default severity rules)"
+                except Exception as e:
+                    logger.warning(f"Failed to fetch camera context: {e}")
             
             # Create detailed detection info with counts
             class_counts = {}
@@ -458,10 +492,10 @@ class DetectionService:
             prompt = f"""You are an expert AI security analyst for a home/office surveillance system called "Chowkidaar".
 
 CONTEXT:
+- Camera: {camera_name}
 - Detected: {detection_summary}
 - Total Objects: {total_objects}
-- Time: {time_context} ({current_time.strftime('%I:%M %p')})
-- Location: Security camera feed
+- Time: {time_context} ({current_time.strftime('%I:%M %p')}){camera_context}
 
 SEVERITY DECISION RULES (MUST FOLLOW):
 
@@ -505,9 +539,11 @@ THREAT_LEVEL: [low/medium/high/critical]
 EVENT_TYPE: [intrusion/theft_attempt/suspicious/loitering/delivery/visitor/package_left/person_detected/vehicle_detected/animal_detected/motion_detected]"""
             
             # Generate analysis using describe_frame
+            logger.debug(f"Calling VLM for event summary with model: {vlm_settings.get('model') if vlm_settings else 'default'}")
             response = await vlm.describe_frame(frame, detections, prompt)
             
-            if response:
+            if response and not response.startswith("Error") and not response.startswith("Failed"):
+                logger.debug(f"VLM raw response: {response[:200]}...")
                 # Parse the response - handle multi-line values
                 summary = ""
                 threat_level = "low"
