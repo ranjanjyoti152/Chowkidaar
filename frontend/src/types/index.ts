@@ -101,6 +101,11 @@ export type EventType =
   | 'motion_detected'
   | 'intrusion'
   | 'loitering'
+  | 'suspicious'
+  | 'theft_attempt'
+  | 'delivery'
+  | 'visitor'
+  | 'package_left'
   | 'custom'
 
 export type EventSeverity = 'low' | 'medium' | 'high' | 'critical'

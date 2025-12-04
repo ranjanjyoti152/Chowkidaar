@@ -463,38 +463,46 @@ CONTEXT:
 - Time: {time_context} ({current_time.strftime('%I:%M %p')})
 - Location: Security camera feed
 
-IMPORTANT RULES FOR ANALYSIS:
-1. Look at the ACTUAL image carefully, not just the detection labels
-2. A "person" detection could be: a real person, a poster, TV screen, mannequin, or misdetection
-3. Objects like chairs, TVs, laptops are NOT threats - mark as LOW severity
-4. Only mark HIGH/CRITICAL if you see ACTUAL threatening activity
-5. MULTIPLE people/vehicles = mention the COUNT in summary
-5. Be conservative - false alarms are worse than missed low-priority events
+SEVERITY DECISION RULES (MUST FOLLOW):
 
-THREAT LEVEL GUIDELINES:
-- CRITICAL: Active fire/smoke, weapon visible, physical violence, break-in in progress, child in danger
-- HIGH: Unknown person at night near entry points, someone hiding/lurking, running away with items, forced entry attempt
-- MEDIUM: Unknown person during day, unusual vehicle, person looking around suspiciously, loitering
-- LOW: Empty scene, furniture/objects only, known safe activity, pets, regular movement, false detection
+🔴 CRITICAL - Immediate danger:
+   • Active fire or smoke visible
+   • Weapon (gun/knife) clearly visible  
+   • Physical violence/fight in progress
+   • Break-in happening right now
+   • Child in immediate danger
 
-EVENT TYPE (choose ONE):
-- intrusion: Break-in attempt, unauthorized entry, climbing fence/wall
-- theft_attempt: Stealing items, taking packages, robbery
-- suspicious: Lurking, hiding, casing the property, unusual behavior
-- loitering: Standing around too long without purpose
-- delivery: Courier, postman, food delivery with uniform/package
-- visitor: Normal person approaching door, guest arriving
-- package_left: Package/parcel placed at door
-- person_detected: Person visible but normal activity
-- vehicle_detected: Car/bike movement
-- animal_detected: Pet or animal
-- motion_detected: No person/vehicle, just objects or empty scene
+🟠 HIGH - Needs attention soon:
+   • Unknown person at NIGHT (10PM-6AM) near doors/windows
+   • Person trying to hide or lurking suspiciously
+   • Someone running away with items
+   • Forced entry attempt visible
+   • Multiple unknown people at night
 
-Analyze the image and respond in this EXACT format (no markdown):
-SUMMARY: [2-3 sentence description of what you actually see in the image]
+🟡 MEDIUM - Monitor situation:
+   • Unknown person during DAYTIME near entry points
+   • Person looking around suspiciously (but not hiding)
+   • Unusual vehicle parked for long time
+   • Someone loitering without clear purpose
+
+🟢 LOW - Normal activity:
+   • Person doing normal activities (walking, standing, talking)
+   • Delivery person with uniform/package
+   • Family/known visitor behavior
+   • Empty scene, just furniture/objects
+   • Pets or animals
+   • Daytime normal movement
+
+IMPORTANT:
+- Time matters: Same activity at 2AM = HIGH, at 2PM = LOW
+- Location matters: Near door/window = more serious
+- Behavior matters: Hiding/lurking = HIGH, walking normally = LOW
+- Always explain WHY you chose that severity level
+
+Analyze the image and respond in this EXACT format:
+SUMMARY: [What you see + WHY this severity level. Example: "Person walking normally near entrance during daytime. LOW because: normal behavior, daytime, no suspicious activity."]
 THREAT_LEVEL: [low/medium/high/critical]
-EVENT_TYPE: [one type from above]
-THREAT_REASON: [Brief reason for your threat assessment]"""
+EVENT_TYPE: [intrusion/theft_attempt/suspicious/loitering/delivery/visitor/package_left/person_detected/vehicle_detected/animal_detected/motion_detected]"""
             
             # Generate analysis using describe_frame
             response = await vlm.describe_frame(frame, detections, prompt)

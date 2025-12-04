@@ -22,6 +22,14 @@ const severityColors: Record<EventSeverity, string> = {
   critical: 'bg-red-500/30 text-red-300 border-red-400/50',
 }
 
+// Severity explanations for tooltips
+const severityExplanations: Record<EventSeverity, string> = {
+  low: '🟢 LOW: Normal activity - no action needed',
+  medium: '🟡 MEDIUM: Worth monitoring - check when convenient',
+  high: '🟠 HIGH: Needs attention - review soon',
+  critical: '🔴 CRITICAL: Immediate action required!',
+}
+
 // Clean markdown and extra LLM formatting from summary
 const cleanSummary = (text: string): string => {
   if (!text) return ''
@@ -38,12 +46,17 @@ const cleanSummary = (text: string): string => {
 const eventTypeLabels: Record<EventType, string> = {
   person_detected: 'Person Detected',
   vehicle_detected: 'Vehicle Detected',
-  fire_detected: 'Fire Detected',
-  smoke_detected: 'Smoke Detected',
+  fire_detected: '🔥 Fire Detected',
+  smoke_detected: '💨 Smoke Detected',
   animal_detected: 'Animal Detected',
   motion_detected: 'Motion Detected',
-  intrusion: 'Intrusion',
-  loitering: 'Loitering',
+  intrusion: '🚨 Intrusion',
+  loitering: '⚠️ Loitering',
+  suspicious: '👁️ Suspicious Activity',
+  theft_attempt: '🚨 Theft Attempt',
+  delivery: '📦 Delivery',
+  visitor: '🚪 Visitor',
+  package_left: '📦 Package Left',
   custom: 'Custom',
 }
 
@@ -216,7 +229,10 @@ export default function Events() {
                       <h3 className="text-white font-medium">
                         {eventTypeLabels[event.event_type] || event.event_type}
                       </h3>
-                      <span className={`badge border ${severityColors[event.severity]}`}>
+                      <span 
+                        className={`badge border ${severityColors[event.severity]} cursor-help`}
+                        title={severityExplanations[event.severity]}
+                      >
                         {event.severity}
                       </span>
                       {!event.is_acknowledged && (
