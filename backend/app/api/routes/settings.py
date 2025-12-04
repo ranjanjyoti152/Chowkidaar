@@ -116,6 +116,8 @@ async def update_settings(
         settings.vlm_url = settings_update.vlm.ollama_url
         settings.auto_summarize = settings_update.vlm.auto_summarize
         settings.summarize_delay = settings_update.vlm.summarize_delay_seconds
+        settings.vlm_safety_scan_enabled = settings_update.vlm.safety_scan_enabled
+        settings.vlm_safety_scan_interval = settings_update.vlm.safety_scan_interval
     
     # Update storage settings
     if settings_update.storage:
@@ -167,7 +169,9 @@ async def update_settings(
             model=settings.vlm_model,
             ollama_url=settings.vlm_url,
             auto_summarize=settings.auto_summarize,
-            summarize_delay_seconds=settings.summarize_delay
+            summarize_delay_seconds=settings.summarize_delay,
+            safety_scan_enabled=getattr(settings, 'vlm_safety_scan_enabled', True),
+            safety_scan_interval=getattr(settings, 'vlm_safety_scan_interval', 30)
         ),
         storage=StorageSettings(
             recordings_path=settings.recordings_path,

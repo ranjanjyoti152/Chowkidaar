@@ -185,6 +185,8 @@ CREATE TABLE IF NOT EXISTS user_settings (
     vlm_url VARCHAR(255) DEFAULT 'http://localhost:11434',
     auto_summarize BOOLEAN DEFAULT true,
     summarize_delay INTEGER DEFAULT 5,
+    vlm_safety_scan_enabled BOOLEAN DEFAULT true,
+    vlm_safety_scan_interval INTEGER DEFAULT 30,
     
     -- Storage settings
     recordings_path VARCHAR(500) DEFAULT '/data/recordings',

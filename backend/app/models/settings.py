@@ -34,6 +34,8 @@ class UserSettings(Base):
     vlm_url: Mapped[str] = mapped_column(String(255), default="http://localhost:11434")
     auto_summarize: Mapped[bool] = mapped_column(default=True)
     summarize_delay: Mapped[int] = mapped_column(default=5)
+    vlm_safety_scan_enabled: Mapped[bool] = mapped_column(default=True)
+    vlm_safety_scan_interval: Mapped[int] = mapped_column(default=30)  # seconds between scans
     
     # Storage settings
     recordings_path: Mapped[str] = mapped_column(String(500), default="/data/recordings")

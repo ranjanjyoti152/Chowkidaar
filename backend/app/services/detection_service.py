@@ -32,6 +32,8 @@ class DetectionService:
         self._camera_tasks: Dict[int, asyncio.Task] = {}
         self._last_event_time: Dict[str, datetime] = {}  # "camera_id:class" -> last time
         self._event_cooldown = 10  # seconds between same class events per camera
+        self._last_vlm_scan: Dict[int, datetime] = {}  # camera_id -> last VLM scan time
+        self._vlm_scan_interval = 30  # VLM safety scan every 30 seconds
     
     async def start(self):
         """Start the detection service"""
@@ -194,6 +196,18 @@ class DetectionService:
                     camera_id, user_id, frame, significant, detector
                 )
                 
+                # Periodic VLM safety scan (even if YOLO missed something)
+                # Get scan interval from user settings
+                vlm_settings = await self._get_vlm_settings(user_id)
+                scan_interval = vlm_settings.get("safety_scan_interval", 30) if vlm_settings else 30
+                
+                now = datetime.now()
+                last_scan = self._last_vlm_scan.get(camera_id)
+                if not last_scan or (now - last_scan).total_seconds() >= scan_interval:
+                    self._last_vlm_scan[camera_id] = now
+                    # Run VLM safety scan in background (don't block detection loop)
+                    asyncio.create_task(self._vlm_safety_scan(camera_id, user_id, frame))
+                
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -259,7 +273,9 @@ class DetectionService:
                         "url": user_settings.vlm_url,
                         "model": user_settings.vlm_model,
                         "auto_summarize": user_settings.auto_summarize,
-                        "summarize_delay": user_settings.summarize_delay
+                        "summarize_delay": user_settings.summarize_delay,
+                        "safety_scan_enabled": getattr(user_settings, 'vlm_safety_scan_enabled', True),
+                        "safety_scan_interval": getattr(user_settings, 'vlm_safety_scan_interval', 30)
                     }
                 return None
         except Exception as e:
@@ -275,11 +291,18 @@ class DetectionService:
         detector
     ):
         """Process detections and create events"""
-        now = datetime.utcnow()
+        now = datetime.now()
         
-        # Group detections by class
+        # Group all detections of same class together
+        class_detections = {}
         for detection in detections:
             class_name = detection["class_name"]
+            if class_name not in class_detections:
+                class_detections[class_name] = []
+            class_detections[class_name].append(detection)
+        
+        # Create one event per class with all detections of that class
+        for class_name, class_dets in class_detections.items():
             cooldown_key = f"{camera_id}:{class_name}"
             
             # Check cooldown for this class on this camera
@@ -290,33 +313,40 @@ class DetectionService:
             # Update cooldown
             self._last_event_time[cooldown_key] = now
             
+            # Use highest confidence detection for primary info
+            primary_detection = max(class_dets, key=lambda x: x["confidence"])
+            
             # Determine event type and severity
-            event_type = self._get_event_type([detection])
-            severity = self._get_severity([detection])
+            event_type = self._get_event_type(class_dets)
+            severity = self._get_severity(class_dets)
             
-            logger.info(f"🔔 Creating event: type={event_type.value}, severity={severity.value}, class={class_name}")
+            # Count of this class
+            count = len(class_dets)
+            logger.info(f"🔔 Creating event: type={event_type.value}, severity={severity.value}, class={class_name}, count={count}")
             
-            # Save frame
-            frame_path = await self._save_frame(camera_id, frame, [detection], detector)
+            # Save frame with ALL detections of this class drawn
+            frame_path = await self._save_frame(camera_id, frame, class_dets, detector)
             logger.debug(f"Frame saved to: {frame_path}")
             
-            # Create event in database
+            # Create event in database with ALL detected objects
             try:
                 async with AsyncSessionLocal() as db:
                     event = Event(
                         event_type=event_type,
                         severity=severity,
                         detected_objects=[{
-                            "class": detection["class_name"],
-                            "confidence": detection["confidence"],
-                            "bbox": detection["bbox"]
-                        }],
-                        confidence_score=detection["confidence"],
+                            "class": d["class_name"],
+                            "confidence": d["confidence"],
+                            "bbox": d["bbox"]
+                        } for d in class_dets],
+                        confidence_score=primary_detection["confidence"],
                         frame_path=frame_path,
                         thumbnail_path=frame_path,
                         detection_metadata={
-                            "model": "yolov8n",
-                            "class": class_name
+                            "model": "yolov8",
+                            "class": class_name,
+                            "count": count,
+                            "all_confidences": [d["confidence"] for d in class_dets]
                         },
                         timestamp=now,
                         camera_id=camera_id,
@@ -326,11 +356,11 @@ class DetectionService:
                     await db.commit()
                     await db.refresh(event)
                     
-                    logger.info(f"✅ Event created: ID={event.id}, {event_type.value} ({class_name}) on camera {camera_id}")
+                    logger.info(f"✅ Event created: ID={event.id}, {event_type.value} ({count}x {class_name}) on camera {camera_id}")
                     
                     # Generate summary with VLM and then send notification
                     asyncio.create_task(
-                        self._generate_summary_and_notify(event.id, frame, [detection], user_id)
+                        self._generate_summary_and_notify(event.id, frame, class_dets, user_id)
                     )
                     
             except Exception as e:
@@ -348,7 +378,7 @@ class DetectionService:
         annotated = detector.draw_detections(frame, detections)
         
         # Create filename
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"cam{camera_id}_{timestamp}_{uuid.uuid4().hex[:8]}.jpg"
         
         # Use absolute path
@@ -383,80 +413,147 @@ class DetectionService:
                 )
                 logger.debug(f"VLM configured for summary: {vlm_settings.get('url')} model: {vlm_settings.get('model')}")
             
-            # Create clean prompt for accurate, concise summary
-            objects = ", ".join(set(d["class_name"] for d in detections))
-            current_time = datetime.utcnow()
+            # Create detailed detection info with counts
+            class_counts = {}
+            for d in detections:
+                cn = d["class_name"]
+                if cn not in class_counts:
+                    class_counts[cn] = {"count": 0, "confidences": []}
+                class_counts[cn]["count"] += 1
+                class_counts[cn]["confidences"].append(d["confidence"])
+            
+            # Format: "3x person (85%, 78%, 72%), 2x car (91%, 88%)"
+            detection_summary = ", ".join([
+                f"{info['count']}x {cls} ({', '.join([f'{c:.0%}' for c in info['confidences']])})"
+                for cls, info in class_counts.items()
+            ])
+            
+            total_objects = len(detections)
+            current_time = datetime.now()
             hour = current_time.hour
-            time_context = "night time" if (hour >= 22 or hour < 6) else "day time" if (6 <= hour < 18) else "evening"
+            
+            # More detailed time context
+            if hour >= 0 and hour < 5:
+                time_context = "late night (most suspicious time)"
+            elif hour >= 5 and hour < 7:
+                time_context = "early morning"
+            elif hour >= 7 and hour < 12:
+                time_context = "morning"
+            elif hour >= 12 and hour < 17:
+                time_context = "afternoon"
+            elif hour >= 17 and hour < 20:
+                time_context = "evening"
+            elif hour >= 20 and hour < 22:
+                time_context = "night"
+            else:
+                time_context = "late night (suspicious time)"
             
             # Combined prompt for summary AND severity analysis
-            prompt = f"""You are an AI security analyst for a surveillance system.
+            prompt = f"""You are an expert AI security analyst for a home/office surveillance system called "Chowkidaar".
 
-DETECTED OBJECTS: {objects}
-TIME: {time_context} ({current_time.strftime('%H:%M')})
-NUMBER OF DETECTIONS: {len(detections)}
+CONTEXT:
+- Detected: {detection_summary}
+- Total Objects: {total_objects}
+- Time: {time_context} ({current_time.strftime('%I:%M %p')})
+- Location: Security camera feed
 
-Analyze this security camera image and provide:
+IMPORTANT RULES FOR ANALYSIS:
+1. Look at the ACTUAL image carefully, not just the detection labels
+2. A "person" detection could be: a real person, a poster, TV screen, mannequin, or misdetection
+3. Objects like chairs, TVs, laptops are NOT threats - mark as LOW severity
+4. Only mark HIGH/CRITICAL if you see ACTUAL threatening activity
+5. MULTIPLE people/vehicles = mention the COUNT in summary
+5. Be conservative - false alarms are worse than missed low-priority events
 
-1. SUMMARY: A brief 2-3 sentence factual description of what you see.
+THREAT LEVEL GUIDELINES:
+- CRITICAL: Active fire/smoke, weapon visible, physical violence, break-in in progress, child in danger
+- HIGH: Unknown person at night near entry points, someone hiding/lurking, running away with items, forced entry attempt
+- MEDIUM: Unknown person during day, unusual vehicle, person looking around suspiciously, loitering
+- LOW: Empty scene, furniture/objects only, known safe activity, pets, regular movement, false detection
 
-2. THREAT_LEVEL: Assess the security threat level as one of: low, medium, high, critical
+EVENT TYPE (choose ONE):
+- intrusion: Break-in attempt, unauthorized entry, climbing fence/wall
+- theft_attempt: Stealing items, taking packages, robbery
+- suspicious: Lurking, hiding, casing the property, unusual behavior
+- loitering: Standing around too long without purpose
+- delivery: Courier, postman, food delivery with uniform/package
+- visitor: Normal person approaching door, guest arriving
+- package_left: Package/parcel placed at door
+- person_detected: Person visible but normal activity
+- vehicle_detected: Car/bike movement
+- animal_detected: Pet or animal
+- motion_detected: No person/vehicle, just objects or empty scene
 
-Consider these threat scenarios:
-- CRITICAL: Fire, smoke, weapons, violent behavior, child in danger, kidnapping, theft in progress, break-in
-- HIGH: Suspicious behavior at night, unknown person near doors/windows, someone running away, loitering, multiple unknown people
-- MEDIUM: Unknown person during day, vehicle in unusual location, animals that could be dangerous
-- LOW: Normal activity, known safe scenarios, pets, regular vehicle movement
-
-3. EVENT_TYPE: Classify this event into ONE of these categories:
-   - delivery: Person delivering package, courier, postman, food delivery
-   - visitor: Known person, guest, family member visiting
-   - package_left: Package or parcel left at door/property
-   - suspicious: Unknown person lurking, hiding, looking around suspiciously
-   - intrusion: Someone trying to break in, unauthorized entry
-   - loitering: Person staying too long without clear purpose
-   - theft_attempt: Someone stealing or taking items
-   - person_detected: Normal person, cannot determine specific type
-   - vehicle_detected: Vehicle movement
-   - animal_detected: Animal or pet
-
-4. THREAT_REASON: One sentence explaining why this threat level.
-
-Format your response EXACTLY like this:
-SUMMARY: [your summary here]
+Analyze the image and respond in this EXACT format (no markdown):
+SUMMARY: [2-3 sentence description of what you actually see in the image]
 THREAT_LEVEL: [low/medium/high/critical]
-EVENT_TYPE: [one of the types above]
-THREAT_REASON: [reason here]
-
-Do NOT use markdown. Be direct and factual."""
+EVENT_TYPE: [one type from above]
+THREAT_REASON: [Brief reason for your threat assessment]"""
             
             # Generate analysis using describe_frame
             response = await vlm.describe_frame(frame, detections, prompt)
             
             if response:
-                # Parse the response
+                # Parse the response - handle multi-line values
                 summary = ""
                 threat_level = "low"
                 event_type_str = ""
                 threat_reason = ""
                 
-                lines = response.strip().split('\n')
-                for line in lines:
-                    line = line.strip()
-                    if line.upper().startswith('SUMMARY:'):
-                        summary = line[8:].strip()
-                    elif line.upper().startswith('THREAT_LEVEL:'):
-                        level = line[13:].strip().lower()
-                        if level in ['low', 'medium', 'high', 'critical']:
-                            threat_level = level
-                    elif line.upper().startswith('EVENT_TYPE:'):
-                        event_type_str = line[11:].strip().lower()
-                    elif line.upper().startswith('THREAT_REASON:'):
-                        threat_reason = line[14:].strip()
+                # Use regex-like parsing for better extraction
+                response_upper = response.upper()
+                response_clean = response.replace('**', '').replace('*', '')
+                
+                # Find SUMMARY
+                if 'SUMMARY:' in response_upper:
+                    start = response_upper.find('SUMMARY:') + 8
+                    # Find next field or end
+                    end = len(response)
+                    for marker in ['THREAT_LEVEL:', 'EVENT_TYPE:', 'THREAT_REASON:']:
+                        pos = response_upper.find(marker, start)
+                        if pos != -1 and pos < end:
+                            end = pos
+                    summary = response_clean[start:end].strip()
+                
+                # Find THREAT_LEVEL
+                if 'THREAT_LEVEL:' in response_upper:
+                    start = response_upper.find('THREAT_LEVEL:') + 13
+                    end = len(response)
+                    for marker in ['EVENT_TYPE:', 'THREAT_REASON:', 'SUMMARY:']:
+                        pos = response_upper.find(marker, start)
+                        if pos != -1 and pos < end:
+                            end = pos
+                    level = response_clean[start:end].strip().lower().split()[0] if response_clean[start:end].strip() else 'low'
+                    if level in ['low', 'medium', 'high', 'critical']:
+                        threat_level = level
+                
+                # Find EVENT_TYPE
+                if 'EVENT_TYPE:' in response_upper:
+                    start = response_upper.find('EVENT_TYPE:') + 11
+                    end = len(response)
+                    for marker in ['THREAT_LEVEL:', 'THREAT_REASON:', 'SUMMARY:']:
+                        pos = response_upper.find(marker, start)
+                        if pos != -1 and pos < end:
+                            end = pos
+                    event_type_str = response_clean[start:end].strip().lower().split()[0] if response_clean[start:end].strip() else ''
+                    # Remove any trailing punctuation
+                    event_type_str = event_type_str.rstrip('.,;:')
+                
+                # Find THREAT_REASON
+                if 'THREAT_REASON:' in response_upper:
+                    start = response_upper.find('THREAT_REASON:') + 14
+                    end = len(response)
+                    for marker in ['SUMMARY:', 'THREAT_LEVEL:', 'EVENT_TYPE:']:
+                        pos = response_upper.find(marker, start)
+                        if pos != -1 and pos < end:
+                            end = pos
+                    threat_reason = response_clean[start:end].strip()
                 
                 # If parsing failed, use full response as summary
                 if not summary:
-                    summary = response.replace('**', '').replace('*', '').strip()
+                    summary = response_clean.strip()[:500]  # Limit to 500 chars
+                
+                logger.debug(f"VLM Response parsed - Summary: {summary[:50]}..., Level: {threat_level}, Type: {event_type_str}")
                 
                 # Map threat level to severity enum
                 severity_map = {
@@ -494,9 +591,9 @@ Do NOT use markdown. Be direct and factual."""
                         "ai_event_type": event_type_str,
                         "ai_threat_reason": threat_reason,
                         "time_context": time_context,
-                        "analyzed_at": datetime.utcnow().isoformat()
+                        "analyzed_at": datetime.now().isoformat()
                     },
-                    "summary_generated_at": datetime.utcnow()
+                    "summary_generated_at": datetime.now()
                 }
                 
                 # Update event type only if LLM classified it
@@ -560,7 +657,7 @@ Do NOT use markdown. Be direct and factual."""
             return EventSeverity.high
         
         # Check time - night detections are more serious
-        hour = datetime.utcnow().hour
+        hour = datetime.now().hour
         is_night = hour >= 22 or hour < 6
         
         if "person" in classes:
@@ -575,6 +672,197 @@ Do NOT use markdown. Be direct and factual."""
     async def stop_all(self):
         """Stop all detection tasks"""
         await self.stop()
+    
+    async def _vlm_safety_scan(self, camera_id: int, user_id: int, frame: np.ndarray):
+        """
+        Periodic VLM scan to detect threats that YOLO might miss.
+        This catches fire, weapons, violence, and other dangerous situations
+        even if they're not in YOLO's training classes.
+        """
+        try:
+            vlm_settings = await self._get_vlm_settings(user_id)
+            if not vlm_settings:
+                return  # VLM not configured
+            
+            # Check if safety scan is enabled
+            if not vlm_settings.get("safety_scan_enabled", True):
+                return  # Safety scan disabled by user
+            
+            vlm = await get_vlm_service()
+            vlm.configure(
+                base_url=vlm_settings.get("url", "http://localhost:11434"),
+                vlm_model=vlm_settings.get("model", "gemma3:4b"),
+                chat_model=vlm_settings.get("model", "gemma3:4b")
+            )
+            
+            current_time = datetime.now()
+            hour = current_time.hour
+            
+            if hour >= 0 and hour < 5:
+                time_context = "late night (most suspicious time)"
+            elif hour >= 5 and hour < 7:
+                time_context = "early morning"
+            elif hour >= 7 and hour < 12:
+                time_context = "morning"
+            elif hour >= 12 and hour < 17:
+                time_context = "afternoon"
+            elif hour >= 17 and hour < 20:
+                time_context = "evening"
+            elif hour >= 20 and hour < 22:
+                time_context = "night"
+            else:
+                time_context = "late night"
+            
+            # Special prompt for VLM-only safety scan
+            prompt = f"""You are a security AI analyzing a surveillance frame for dangerous situations that automated detection might miss.
+
+TIME: {current_time.strftime('%H:%M')} ({time_context})
+
+YOUR MISSION: Look for CRITICAL THREATS that object detection models cannot see:
+1. FIRE or FLAMES anywhere in the image
+2. SMOKE (even small amounts)
+3. WEAPONS (guns, knives, sticks being used as weapons)
+4. PHYSICAL VIOLENCE or FIGHTING
+5. BREAK-IN or forced entry in progress
+6. SUSPICIOUS PACKAGES that could be dangerous
+7. FLOODING or water damage
+8. FALLEN/INJURED person
+9. CHILD in danger or unsupervised in dangerous area
+10. Any other EMERGENCY SITUATION
+
+BE VERY CAREFUL:
+- Only report REAL threats you can clearly see
+- False alarms waste resources and reduce trust
+- Normal activities are NOT threats
+- If scene looks safe, say "SAFE"
+
+Respond in this EXACT format:
+THREAT_DETECTED: [yes/no]
+THREAT_TYPE: [fire/smoke/weapon/violence/intrusion/suspicious_package/flooding/medical/child_danger/other/none]
+THREAT_LEVEL: [critical/high/medium/low/safe]
+DESCRIPTION: [What you see - be specific about location in frame and what's happening]"""
+
+            # Use describe_frame with empty detections list
+            response = await vlm.describe_frame(frame, [], prompt)
+            
+            if not response:
+                return
+            
+            logger.debug(f"VLM Safety Scan camera {camera_id}: {response[:100]}...")
+            
+            # Parse response
+            response_upper = response.upper()
+            response_clean = response.replace('**', '').replace('*', '')
+            
+            threat_detected = False
+            threat_type = "none"
+            threat_level = "safe"
+            description = ""
+            
+            # Parse THREAT_DETECTED
+            if 'THREAT_DETECTED:' in response_upper:
+                start = response_upper.find('THREAT_DETECTED:') + 16
+                end = min(start + 20, len(response))
+                answer = response_clean[start:end].strip().lower()
+                threat_detected = 'yes' in answer or 'true' in answer
+            
+            # Parse THREAT_TYPE
+            if 'THREAT_TYPE:' in response_upper:
+                start = response_upper.find('THREAT_TYPE:') + 12
+                end = len(response)
+                for marker in ['THREAT_LEVEL:', 'DESCRIPTION:', 'THREAT_DETECTED:']:
+                    pos = response_upper.find(marker, start)
+                    if pos != -1 and pos < end:
+                        end = pos
+                threat_type = response_clean[start:end].strip().lower().split()[0] if response_clean[start:end].strip() else 'none'
+                threat_type = threat_type.rstrip('.,;:')
+            
+            # Parse THREAT_LEVEL
+            if 'THREAT_LEVEL:' in response_upper:
+                start = response_upper.find('THREAT_LEVEL:') + 13
+                end = len(response)
+                for marker in ['THREAT_TYPE:', 'DESCRIPTION:', 'THREAT_DETECTED:']:
+                    pos = response_upper.find(marker, start)
+                    if pos != -1 and pos < end:
+                        end = pos
+                level = response_clean[start:end].strip().lower().split()[0] if response_clean[start:end].strip() else 'safe'
+                if level in ['critical', 'high', 'medium', 'low', 'safe']:
+                    threat_level = level
+            
+            # Parse DESCRIPTION
+            if 'DESCRIPTION:' in response_upper:
+                start = response_upper.find('DESCRIPTION:') + 12
+                end = len(response)
+                for marker in ['THREAT_DETECTED:', 'THREAT_TYPE:', 'THREAT_LEVEL:']:
+                    pos = response_upper.find(marker, start)
+                    if pos != -1 and pos < end:
+                        end = pos
+                description = response_clean[start:end].strip()
+            
+            # Only create event if real threat detected
+            if threat_detected and threat_level in ['critical', 'high', 'medium']:
+                logger.warning(f"🚨 VLM Safety Scan detected {threat_level.upper()} threat on camera {camera_id}: {threat_type}")
+                
+                # Map threat type to event type
+                threat_event_map = {
+                    'fire': EventType.fire_detected,
+                    'smoke': EventType.smoke_detected,
+                    'weapon': EventType.intrusion,
+                    'violence': EventType.intrusion,
+                    'intrusion': EventType.intrusion,
+                    'suspicious_package': EventType.suspicious,
+                    'flooding': EventType.motion_detected,
+                    'medical': EventType.motion_detected,
+                    'child_danger': EventType.suspicious,
+                }
+                event_type = threat_event_map.get(threat_type, EventType.suspicious)
+                
+                # Map threat level to severity
+                severity_map = {
+                    'critical': EventSeverity.critical,
+                    'high': EventSeverity.high,
+                    'medium': EventSeverity.medium
+                }
+                severity = severity_map.get(threat_level, EventSeverity.medium)
+                
+                # Save frame
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                frame_filename = f"vlm_scan_{camera_id}_{timestamp}_{uuid.uuid4().hex[:8]}.jpg"
+                frame_path = Path(settings.STORAGE_PATH) / "events" / frame_filename
+                frame_path.parent.mkdir(parents=True, exist_ok=True)
+                cv2.imwrite(str(frame_path), frame)
+                
+                # Create VLM-detected event
+                async with AsyncSessionLocal() as db:
+                    event = Event(
+                        camera_id=camera_id,
+                        event_type=event_type,
+                        severity=severity,
+                        summary=description or f"VLM detected {threat_type} threat",
+                        frame_path=str(frame_path),
+                        detection_metadata={
+                            "source": "vlm_safety_scan",
+                            "vlm_threat_type": threat_type,
+                            "vlm_threat_level": threat_level,
+                            "vlm_description": description,
+                            "time_context": time_context,
+                            "scan_time": datetime.now().isoformat()
+                        },
+                        summary_generated_at=datetime.now()
+                    )
+                    db.add(event)
+                    await db.commit()
+                    await db.refresh(event)
+                    
+                    logger.warning(f"🔥 VLM Safety Event created: ID={event.id}, Type={threat_type}, Level={threat_level}")
+                    
+                    # Send immediate notification for VLM-detected threats
+                    await send_event_notification(event, user_id)
+            else:
+                logger.debug(f"VLM Safety Scan camera {camera_id}: Scene is safe")
+                
+        except Exception as e:
+            logger.error(f"VLM Safety Scan error for camera {camera_id}: {e}")
 
 
 # Global instance

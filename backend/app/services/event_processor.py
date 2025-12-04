@@ -95,7 +95,7 @@ class EventProcessor:
                     event_type=event_type.value,
                     detected_objects=filtered,
                     camera_name=camera_name,
-                    timestamp=datetime.utcnow()
+                    timestamp=datetime.now()
                 )
             except Exception as e:
                 logger.error(f"VLM summary error: {e}")
@@ -115,8 +115,8 @@ class EventProcessor:
             "frame_path": str(frame_path) if frame_path else None,
             "thumbnail_path": str(thumbnail_path) if thumbnail_path else None,
             "summary": summary,
-            "summary_generated_at": datetime.utcnow() if summary else None,
-            "timestamp": datetime.utcnow()
+            "summary_generated_at": datetime.now() if summary else None,
+            "timestamp": datetime.now()
         }
         
         # Update cooldown
@@ -140,7 +140,7 @@ class EventProcessor:
         if camera_id not in self._last_events:
             return True
         
-        now = datetime.utcnow()
+        now = datetime.now()
         camera_events = self._last_events[camera_id]
         
         for det in detections:
@@ -163,7 +163,7 @@ class EventProcessor:
         if camera_id not in self._last_events:
             self._last_events[camera_id] = {}
         
-        now = datetime.utcnow()
+        now = datetime.now()
         for det in detections:
             self._last_events[camera_id][det["class_name"]] = now
     
@@ -208,7 +208,7 @@ class EventProcessor:
     ) -> Optional[Path]:
         """Save event frame to storage"""
         try:
-            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"camera_{camera_id}_{timestamp}_{uuid.uuid4().hex[:8]}.jpg"
             filepath = self.frames_path / filename
             
@@ -234,7 +234,7 @@ class EventProcessor:
             # Resize
             thumbnail = cv2.resize(frame, size)
             
-            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"thumb_camera_{camera_id}_{timestamp}_{uuid.uuid4().hex[:8]}.jpg"
             filepath = self.frames_path / "thumbnails"
             filepath.mkdir(exist_ok=True)
