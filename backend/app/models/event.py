@@ -26,9 +26,12 @@ class EventType(str, enum.Enum):
     loitering = "loitering"         # Person staying too long
     theft_attempt = "theft_attempt" # Stealing, taking items
     
-    # Emergency
+    # Emergency / Safety
     fire_detected = "fire_detected"
     smoke_detected = "smoke_detected"
+    fall_detected = "fall_detected"       # Person fallen/collapsed
+    accident = "accident"                 # Collision, crash, injury
+    medical_emergency = "medical_emergency" # Person needs medical help
     
     # Other
     custom = "custom"

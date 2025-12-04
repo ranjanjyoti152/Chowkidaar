@@ -87,6 +87,17 @@ class NotificationService:
             bot_token = settings.telegram_bot_token
             chat_id = settings.telegram_chat_id
             
+            # Helper function to escape Markdown special characters
+            def escape_markdown(text: str) -> str:
+                """Escape special characters for Telegram Markdown"""
+                if not text:
+                    return ""
+                # Escape these characters: _ * [ ] ( ) ~ ` > # + - = | { } . !
+                special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+                for char in special_chars:
+                    text = text.replace(char, f'\\{char}')
+                return text
+            
             # Build message
             message_parts = []
             
@@ -100,7 +111,7 @@ class NotificationService:
             emoji = severity_emoji.get(event.severity.value, '⚪')
             
             event_type_display = event.event_type.value.replace('_', ' ').title()
-            message_parts.append(f"{emoji} *{event_type_display}*")
+            message_parts.append(f"{emoji} *{escape_markdown(event_type_display)}*")
             message_parts.append(f"🕐 {event.timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
             
             # Event details
@@ -112,45 +123,74 @@ class NotificationService:
                     objects = event.detected_objects
                     if isinstance(objects, list) and objects:
                         detected = [obj.get('class', 'unknown') for obj in objects]
-                        message_parts.append(f"🎯 *Detected:* {', '.join(detected)}")
+                        message_parts.append(f"🎯 *Detected:* {escape_markdown(', '.join(detected))}")
             
-            # AI Summary
+            # AI Summary - escape markdown to prevent parsing errors
             if settings.telegram_send_summary and event.summary:
-                message_parts.append(f"\n📝 *Summary:*\n{event.summary}")
+                safe_summary = escape_markdown(event.summary)
+                message_parts.append(f"\n📝 *Summary:*\n{safe_summary}")
             
             message = '\n'.join(message_parts)
             
             # Send with photo or text only
             if settings.telegram_send_photo and event.frame_path and Path(event.frame_path).exists():
-                # Send photo with caption
+                # Send photo with caption - use HTML parse mode (more forgiving)
                 url = f"https://api.telegram.org/bot{bot_token}/sendPhoto"
+                
+                # Convert to HTML format
+                html_message = message.replace('*', '<b>').replace('</b><b>', '</b>').rstrip('<b>') + '</b>' if '*' in message else message
+                # Simple conversion: replace *text* with <b>text</b>
+                import re
+                html_message = re.sub(r'\*([^*]+)\*', r'<b>\1</b>', message)
                 
                 with open(event.frame_path, 'rb') as photo:
                     data = aiohttp.FormData()
                     data.add_field('chat_id', chat_id)
-                    data.add_field('caption', message)
-                    data.add_field('parse_mode', 'Markdown')
+                    data.add_field('caption', html_message)
+                    data.add_field('parse_mode', 'HTML')
                     data.add_field('photo', photo, filename='event.jpg')
                     
                     async with session.post(url, data=data) as resp:
                         if resp.status != 200:
                             error = await resp.text()
                             logger.error(f"Telegram API error: {error}")
+                            # Retry without parse mode
+                            data2 = aiohttp.FormData()
+                            data2.add_field('chat_id', chat_id)
+                            data2.add_field('caption', message.replace('*', ''))
+                            with open(event.frame_path, 'rb') as photo2:
+                                data2.add_field('photo', photo2, filename='event.jpg')
+                                async with session.post(url, data=data2) as resp2:
+                                    if resp2.status == 200:
+                                        logger.info(f"✅ Telegram notification sent (plain text) for event {event.id}")
                         else:
                             logger.info(f"✅ Telegram notification sent for event {event.id}")
             else:
                 # Send text only
                 url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+                
+                # Convert to HTML
+                import re
+                html_message = re.sub(r'\*([^*]+)\*', r'<b>\1</b>', message)
+                
                 payload = {
                     'chat_id': chat_id,
-                    'text': message,
-                    'parse_mode': 'Markdown'
+                    'text': html_message,
+                    'parse_mode': 'HTML'
                 }
                 
                 async with session.post(url, json=payload) as resp:
                     if resp.status != 200:
                         error = await resp.text()
                         logger.error(f"Telegram API error: {error}")
+                        # Retry without parse mode
+                        payload2 = {
+                            'chat_id': chat_id,
+                            'text': message.replace('*', '')
+                        }
+                        async with session.post(url, json=payload2) as resp2:
+                            if resp2.status == 200:
+                                logger.info(f"✅ Telegram notification sent (plain text) for event {event.id}")
                     else:
                         logger.info(f"✅ Telegram notification sent for event {event.id}")
                         

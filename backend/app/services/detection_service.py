@@ -488,55 +488,52 @@ class DetectionService:
             else:
                 time_context = "late night (suspicious time)"
             
-            # Combined prompt for summary AND severity analysis
-            prompt = f"""You are an expert AI security analyst for a home/office surveillance system called "Chowkidaar".
+            # Combined prompt for summary AND severity analysis - BALANCED for accuracy
+            prompt = f"""You are a PRECISE security AI. Detect REAL threats, avoid FALSE ALARMS.
 
-CONTEXT:
+🚨 REAL THREATS TO FLAG (HIGH/CRITICAL):
+- 🔥 REAL FIRE: Actual flames burning something, fire spreading, orange/yellow flames with smoke
+- 💨 REAL SMOKE: Gray/black smoke rising from burning, not steam or mist
+- 🔪 WEAPONS: Gun, knife being threatened with, not kitchen knives in kitchen
+- 👊 VIOLENCE: Actual physical assault, hitting, not playful interaction
+- 🚶 FALL/MEDICAL: Person collapsed on ground, unconscious, not sitting/resting intentionally
+- 🏃 THEFT: Someone grabbing items and fleeing, not carrying own belongings
+- 💥 ACCIDENT: Vehicle crash, person injured, visible damage
+- 🚪 BREAK-IN: Forcing door/window, breaking glass
+
+❌ NOT THREATS (DO NOT FLAG AS HIGH):
+- RGB lights, LED strips, neon signs, colored decorative lights = NOT FIRE
+- Pink/purple/blue wall lights = decorative lighting, NOT fire
+- Computer monitors glowing = NOT fire
+- Steam from cooking, fog machine, vape = NOT dangerous smoke
+- Person sitting on floor intentionally = NOT a fall
+- Person lying on couch/bed = NOT unconscious
+- Kitchen knife while cooking = NOT weapon
+- Kids play-fighting = NOT violence
+- Person carrying their own bags = NOT theft
+
+DETECTION INFO:
 - Camera: {camera_name}
-- Detected: {detection_summary}
-- Total Objects: {total_objects}
+- Objects Detected: {detection_summary}
+- Count: {total_objects} object(s)
 - Time: {time_context} ({current_time.strftime('%I:%M %p')}){camera_context}
 
-SEVERITY DECISION RULES (MUST FOLLOW):
+SEVERITY RULES:
+🔴 CRITICAL: Active real fire with flames, violence with injury, weapon pointed at person
+🟠 HIGH: Real lighter/match with flame, person collapsed unexpectedly, theft in progress, intruder at night
+🟡 MEDIUM: Suspicious behavior, unknown person, unusual activity
+🟢 LOW: Normal activity, decorative lights, people working/sitting, routine behavior
 
-🔴 CRITICAL - Immediate danger:
-   • Active fire or smoke visible
-   • Weapon (gun/knife) clearly visible  
-   • Physical violence/fight in progress
-   • Break-in happening right now
-   • Child in immediate danger
+⚠️ IMPORTANT DISTINCTIONS:
+- Colored LED/RGB lights on wall = LOW (decorative) 
+- Actual flame burning something = CRITICAL (fire)
+- Person sitting on floor by choice = LOW (normal)
+- Person fallen and not moving = HIGH (emergency)
 
-🟠 HIGH - Needs attention soon:
-   • Unknown person at NIGHT (10PM-6AM) near doors/windows
-   • Person trying to hide or lurking suspiciously
-   • Someone running away with items
-   • Forced entry attempt visible
-   • Multiple unknown people at night
-
-🟡 MEDIUM - Monitor situation:
-   • Unknown person during DAYTIME near entry points
-   • Person looking around suspiciously (but not hiding)
-   • Unusual vehicle parked for long time
-   • Someone loitering without clear purpose
-
-🟢 LOW - Normal activity:
-   • Person doing normal activities (walking, standing, talking)
-   • Delivery person with uniform/package
-   • Family/known visitor behavior
-   • Empty scene, just furniture/objects
-   • Pets or animals
-   • Daytime normal movement
-
-IMPORTANT:
-- Time matters: Same activity at 2AM = HIGH, at 2PM = LOW
-- Location matters: Near door/window = more serious
-- Behavior matters: Hiding/lurking = HIGH, walking normally = LOW
-- Always explain WHY you chose that severity level
-
-Analyze the image and respond in this EXACT format:
-SUMMARY: [What you see + WHY this severity level. Example: "Person walking normally near entrance during daytime. LOW because: normal behavior, daytime, no suspicious activity."]
+RESPOND IN THIS EXACT FORMAT:
+SUMMARY: [Describe what you ACTUALLY see. Be specific about colors, positions, actions]
 THREAT_LEVEL: [low/medium/high/critical]
-EVENT_TYPE: [intrusion/theft_attempt/suspicious/loitering/delivery/visitor/package_left/person_detected/vehicle_detected/animal_detected/motion_detected]"""
+EVENT_TYPE: [fire_detected/smoke_detected/intrusion/suspicious/theft_attempt/person_detected/vehicle_detected/delivery/visitor]"""
             
             # Generate analysis using describe_frame
             logger.debug(f"Calling VLM for event summary with model: {vlm_settings.get('model') if vlm_settings else 'default'}")
@@ -745,6 +742,31 @@ EVENT_TYPE: [intrusion/theft_attempt/suspicious/loitering/delivery/visitor/packa
                 chat_model=vlm_settings.get("model", "gemma3:4b")
             )
             
+            # Fetch camera context for safety scan
+            camera_context = ""
+            camera_name = f"Camera {camera_id}"
+            try:
+                async with AsyncSessionLocal() as db:
+                    from app.models.camera import Camera
+                    result = await db.execute(
+                        select(Camera).where(Camera.id == camera_id)
+                    )
+                    camera = result.scalar_one_or_none()
+                    if camera:
+                        camera_name = camera.name or f"Camera {camera_id}"
+                        if camera.expected_activity or camera.unexpected_activity:
+                            camera_context = f"""
+CAMERA CONTEXT:
+- Location: {camera.location_type or 'Unknown'}
+- Expected (NORMAL): {camera.expected_activity or 'Not specified'}
+- Unexpected (ALERT): {camera.unexpected_activity or 'Not specified'}
+- Normal Conditions: {camera.normal_conditions or 'Not specified'}
+
+⚠️ If you see activity matching "Expected" → it's probably SAFE
+⚠️ If you see activity matching "Unexpected" → it might be a threat"""
+            except Exception as e:
+                logger.warning(f"Failed to get camera context for safety scan: {e}")
+            
             current_time = datetime.now()
             hour = current_time.hour
             
@@ -763,42 +785,55 @@ EVENT_TYPE: [intrusion/theft_attempt/suspicious/loitering/delivery/visitor/packa
             else:
                 time_context = "late night"
             
-            # Anti-hallucination: Conservative prompt with confidence requirement
-            prompt = f"""You are a VERY CAREFUL security AI. Your job is to detect ONLY REAL, CLEARLY VISIBLE threats.
+            # Balanced safety scan - detect real threats, avoid false alarms
+            prompt = f"""You are a PRECISE security AI. Detect REAL threats, avoid FALSE ALARMS.
 
-TIME: {current_time.strftime('%H:%M')} ({time_context})
+CAMERA: {camera_name}
+TIME: {current_time.strftime('%H:%M')} ({time_context}){camera_context}
 
-CRITICAL WARNINGS - READ CAREFULLY:
-⚠️ FALSE ALARMS ARE VERY BAD - they waste emergency response resources
-⚠️ When in doubt, say SAFE - better to miss something minor than create panic
-⚠️ Normal shadows, reflections, TV screens showing fire/violence are NOT threats
-⚠️ Paintings, posters, or decorations are NOT threats
-⚠️ Red/orange colored objects are NOT automatically fire
-⚠️ People arguing or having normal disagreements is NOT violence
+🚨 REAL THREATS TO DETECT:
 
-ONLY report if you see CLEAR, UNMISTAKABLE evidence of:
-1. REAL FIRE - actual flames burning something, not just orange/red colors
-2. REAL SMOKE - gray/black smoke rising, not steam or mist
-3. REAL WEAPONS - clearly visible gun, knife being threatened with
-4. REAL VIOLENCE - actual physical assault in progress
-5. REAL BREAK-IN - someone forcing entry through door/window
-6. REAL EMERGENCY - person collapsed, child in immediate danger
+🔥 REAL FIRE (CRITICAL/HIGH):
+- Actual flames burning something (orange/yellow fire with smoke)
+- Building/object on fire
+- Sparks causing fire
+❌ NOT FIRE: RGB/LED lights, neon signs, pink/purple/blue decorative lights, monitor glow, colored wall lights
 
-HOW CONFIDENT ARE YOU? Rate yourself:
-- 90-100%: Absolutely certain, unmistakable threat
-- 70-89%: Very likely a threat, clear evidence
-- 50-69%: Possibly a threat, some evidence
-- Below 50%: Not sure, probably safe
+💨 REAL SMOKE (HIGH):
+- Gray/black smoke rising from burning
+- Visible smoke indicating fire
+❌ NOT SMOKE: Steam, mist, fog, vape clouds, cooking steam
 
-ONLY report threats with 70%+ confidence!
+👤 REAL EMERGENCY (HIGH):
+- Person collapsed unexpectedly, lying motionless
+- Person fallen and appears hurt
+- Person in visible distress
+❌ NOT EMERGENCY: Person sitting on floor by choice, person resting on couch, person lying in bed
+
+🔪 REAL VIOLENCE/WEAPONS (CRITICAL):
+- Actual gun/knife being used to threaten
+- Physical assault in progress
+- Real fighting with intent to harm
+❌ NOT VIOLENCE: Kitchen knife while cooking, play-fighting, sports equipment in use
+
+🚨 REAL SECURITY THREAT (HIGH):
+- Person forcing open door/window
+- Someone grabbing items and running away
+- Unknown person at night trying to enter
+❌ NOT THREAT: Delivery person, known visitor, person carrying own items
+
+⚠️ KEY DISTINCTIONS:
+- Colored LED/RGB lights on wall = SAFE (decorative lighting)
+- Actual flame burning = CRITICAL (real fire)
+- Person relaxing on floor = SAFE (intentional)
+- Person fallen unconscious = HIGH (emergency)
 
 Respond in this EXACT format:
 THREAT_DETECTED: [yes/no]
-CONFIDENCE: [0-100 percentage]
-THREAT_TYPE: [fire/smoke/weapon/violence/intrusion/medical/child_danger/none]
+CONFIDENCE: [0-100]
+THREAT_TYPE: [fire/smoke/weapon/violence/intrusion/fall/theft/medical/none]
 THREAT_LEVEL: [critical/high/medium/safe]
-DESCRIPTION: [Specific details - WHERE in frame, WHAT exactly you see, WHY you're confident]
-DOUBT: [Any reasons this might be a false alarm]"""
+DESCRIPTION: [What you ACTUALLY see - be specific]"""
 
             # Use describe_frame with empty detections list
             response = await vlm.describe_frame(frame, [], prompt)
@@ -880,24 +915,31 @@ DOUBT: [Any reasons this might be a false alarm]"""
                         end = pos
                 description = response_clean[start:end].strip()
             
-            # ========== ANTI-HALLUCINATION CHECKS ==========
+            # ========== THREAT VERIFICATION (less strict for safety) ==========
             
-            # Check 1: Confidence threshold (must be 70%+)
-            if threat_detected and confidence < 70:
-                logger.info(f"⚠️ VLM camera {camera_id}: Threat rejected - low confidence ({confidence}%). Doubt: {doubt[:100] if doubt else 'N/A'}")
+            # Check 1: Confidence threshold - lowered to 60% for safety
+            if threat_detected and confidence < 60:
+                logger.info(f"⚠️ VLM camera {camera_id}: Threat rejected - low confidence ({confidence}%)")
                 threat_detected = False
             
-            # Check 2: Cooldown - don't alert same threat type repeatedly
+            # Check 2: Cooldown - shorter cooldown (2 min) for faster re-alerts
             if threat_detected:
                 cooldown_key = f"{camera_id}:{threat_type}"
                 last_alert = self._vlm_threat_cooldown.get(cooldown_key)
-                if last_alert and (datetime.now() - last_alert).total_seconds() < self._vlm_threat_cooldown_seconds:
+                # Reduced cooldown from 3 min to 2 min
+                if last_alert and (datetime.now() - last_alert).total_seconds() < 120:
                     logger.debug(f"VLM camera {camera_id}: Threat {threat_type} in cooldown, skipping")
                     threat_detected = False
             
-            # Check 3: Multi-frame verification (need 2 consecutive detections for same threat)
-            if threat_detected and threat_level in ['high', 'medium']:  # Critical bypasses for speed
-                pending = self._pending_vlm_threats.get(camera_id)
+            # Check 3: CRITICAL threats bypass multi-frame verification
+            # For safety-critical threats, alert immediately
+            if threat_detected:
+                if threat_level == 'critical' or threat_type in ['fire', 'smoke', 'weapon', 'violence', 'fall', 'medical']:
+                    # CRITICAL safety threats - IMMEDIATE alert, no waiting
+                    logger.warning(f"🚨 VLM camera {camera_id}: IMMEDIATE safety threat: {threat_type} ({confidence}%)")
+                elif threat_level in ['high', 'medium']:
+                    # Non-critical but suspicious - still do quick verification
+                    pending = self._pending_vlm_threats.get(camera_id)
                 
                 if pending and pending.get('threat_type') == threat_type:
                     # Same threat detected again - CONFIRMED!

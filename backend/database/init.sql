@@ -40,8 +40,11 @@ DO $$ BEGIN
         'loitering',          -- Person staying too long without purpose
         'theft_attempt',      -- Stealing, taking items
         
-        -- Emergency
+        -- Emergency / Safety
         'fire_detected', 'smoke_detected',
+        'fall_detected',      -- Person fallen/collapsed
+        'accident',           -- Collision, crash, injury
+        'medical_emergency',  -- Person needs medical help
         
         -- Other
         'custom'
