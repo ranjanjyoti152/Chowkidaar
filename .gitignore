@@ -92,14 +92,18 @@ Thumbs.db
 # Data & Logs
 # =============================================================================
 data/
-logs/
+logs/*.log
 *.log
-recordings/
-snapshots/
 
-# Storage - Event frames and thumbnails
-backend/storage/
-storage/
+# Storage - Event frames and thumbnails (keep .gitkeep files)
+backend/storage/**/*
+!backend/storage/**/.gitkeep
+backend/models/*.pt
+backend/models/*.pth
+!backend/models/.gitkeep
+!backend/logs/.gitkeep
+
+# Image files in storage
 *.jpg
 *.jpeg
 *.png

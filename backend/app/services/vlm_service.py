@@ -679,9 +679,12 @@ class UnifiedVLMService:
     def _get_provider(self) -> BaseLLMProvider:
         """Get the current active provider"""
         if self.current_provider == "openai" and self.openai:
+            logger.debug(f"Using OpenAI provider with model: {self.openai.model}")
             return self.openai
         elif self.current_provider == "gemini" and self.gemini:
+            logger.debug(f"Using Gemini provider with model: {self.gemini.model}")
             return self.gemini
+        logger.debug(f"Using Ollama provider with model: {self.ollama.vlm_model}")
         return self.ollama
     
     async def check_health(self) -> bool:
@@ -699,7 +702,10 @@ class UnifiedVLMService:
         prompt: Optional[str] = None
     ) -> str:
         """Generate description using the current provider"""
-        return await self._get_provider().describe_frame(frame, detected_objects, prompt)
+        provider = self._get_provider()
+        provider_name = self.current_provider
+        logger.info(f"🤖 VLM describe_frame using provider: {provider_name}")
+        return await provider.describe_frame(frame, detected_objects, prompt)
     
     async def generate_event_summary(
         self,

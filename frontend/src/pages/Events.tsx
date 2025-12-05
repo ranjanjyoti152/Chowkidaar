@@ -318,7 +318,7 @@ export default function Events() {
                   <div className="w-24 h-16 rounded-lg bg-dark-400 overflow-hidden flex-shrink-0">
                     {event.thumbnail_path ? (
                       <img
-                        src={`/api/v1/events/${event.id}/thumbnail?token=${token}`}
+                        src={`${eventApi.getThumbnailUrl(event.id)}?token=${token}`}
                         alt="Event thumbnail"
                         className="w-full h-full object-cover"
                         onError={(e) => {
@@ -431,7 +431,7 @@ export default function Events() {
               <div className="aspect-video rounded-xl overflow-hidden bg-dark-400">
                 {selectedEvent.frame_path ? (
                   <img
-                    src={`/api/v1/events/${selectedEvent.id}/frame?token=${token}`}
+                    src={`${eventApi.getFrameUrl(selectedEvent.id)}?token=${token}`}
                     alt="Event frame"
                     className="w-full h-full object-contain"
                     onError={(e) => {

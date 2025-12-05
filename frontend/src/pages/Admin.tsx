@@ -341,11 +341,18 @@ export default function Admin() {
   return (
     <div className="page-container">
       {/* Header */}
-      <div className="page-header">
+      <motion.div 
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="page-header"
+      >
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-primary-500/20 flex items-center justify-center">
+          <motion.div 
+            whileHover={{ scale: 1.1, rotate: 5 }}
+            className="w-10 h-10 rounded-xl bg-primary-500/20 flex items-center justify-center"
+          >
             <UserGroupIcon className="w-5 h-5 text-primary-400" />
-          </div>
+          </motion.div>
           <div>
             <h1 className="page-title">User Management</h1>
             <p className="text-gray-400 mt-1">
@@ -353,7 +360,9 @@ export default function Admin() {
             </p>
           </div>
         </div>
-        <button
+        <motion.button
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
           onClick={() => {
             resetForm()
             setEditingUser(null)
@@ -363,11 +372,16 @@ export default function Admin() {
         >
           <PlusIcon className="w-5 h-5" />
           Add User
-        </button>
-      </div>
+        </motion.button>
+      </motion.div>
 
       {/* Role Legend */}
-      <div className="glass-card p-4 flex flex-wrap gap-4">
+      <motion.div 
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.1 }}
+        className="glass-card p-4 flex flex-wrap gap-4 items-center"
+      >
         <span className="text-sm text-gray-400">Roles:</span>
         {(['admin', 'operator', 'viewer'] as UserRole[]).map((role) => (
           <div key={role} className="flex items-center gap-2">
@@ -375,49 +389,65 @@ export default function Admin() {
             <span className="text-xs text-gray-500">{roleDescriptions[role]}</span>
           </div>
         ))}
-      </div>
+      </motion.div>
 
       {/* Pending Users Section */}
-      {pendingUsers && pendingUsers.length > 0 && (
-        <div className="glass-card overflow-hidden border-2 border-yellow-500/30">
-          <div className="p-4 bg-yellow-500/10 border-b border-yellow-500/20">
-            <div className="flex items-center gap-2">
-              <ClockIcon className="w-5 h-5 text-yellow-400" />
-              <h2 className="text-lg font-semibold text-yellow-400">
-                Pending Approvals ({pendingUsers.length})
-              </h2>
+      <AnimatePresence>
+        {pendingUsers && pendingUsers.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            transition={{ delay: 0.2 }}
+            className="glass-card overflow-hidden border-2 border-yellow-500/30"
+          >
+            <div className="p-4 bg-yellow-500/10 border-b border-yellow-500/20">
+              <div className="flex items-center gap-2">
+                <motion.div animate={{ rotate: [0, 360] }} transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}>
+                  <ClockIcon className="w-5 h-5 text-yellow-400" />
+                </motion.div>
+                <h2 className="text-lg font-semibold text-yellow-400">
+                  Pending Approvals ({pendingUsers.length})
+                </h2>
+              </div>
+              <p className="text-sm text-gray-400 mt-1">
+                These users have registered and are waiting for your approval
+              </p>
             </div>
-            <p className="text-sm text-gray-400 mt-1">
-              These users have registered and are waiting for your approval
-            </p>
-          </div>
-          <div className="divide-y divide-white/10">
-            {pendingUsers.map((user: User) => (
-              <motion.div
-                key={user.id}
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="p-4 flex items-center justify-between hover:bg-white/5"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-yellow-400 to-yellow-600 flex items-center justify-center">
-                    <span className="text-white font-semibold text-sm">
-                      {user.username.charAt(0).toUpperCase()}
-                    </span>
-                  </div>
-                  <div>
-                    <p className="text-white font-medium">{user.username}</p>
-                    <p className="text-sm text-gray-400">{user.email}</p>
-                    {user.full_name && (
-                      <p className="text-xs text-gray-500">{user.full_name}</p>
-                    )}
+            <div className="divide-y divide-white/10">
+              {pendingUsers.map((user: User, idx: number) => (
+                <motion.div
+                  key={user.id}
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: idx * 0.1 }}
+                  whileHover={{ backgroundColor: 'rgba(255,255,255,0.03)' }}
+                  className="p-4 flex items-center justify-between"
+                >
+                  <div className="flex items-center gap-3">
+                    <motion.div 
+                      whileHover={{ scale: 1.1 }}
+                      className="w-10 h-10 rounded-full bg-gradient-to-br from-yellow-400 to-yellow-600 flex items-center justify-center shadow-lg shadow-yellow-500/30"
+                    >
+                      <span className="text-white font-semibold text-sm">
+                        {user.username.charAt(0).toUpperCase()}
+                      </span>
+                    </motion.div>
+                    <div>
+                      <p className="text-white font-medium">{user.username}</p>
+                      <p className="text-sm text-gray-400">{user.email}</p>
+                      {user.full_name && (
+                        <p className="text-xs text-gray-500">{user.full_name}</p>
+                      )}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-gray-500">
                     Registered: {new Date(user.created_at).toLocaleDateString()}
                   </span>
-                  <button
+                  <motion.button
+                    whileHover={{ scale: 1.1 }}
+                    whileTap={{ scale: 0.9 }}
                     onClick={() => {
                       if (confirm(`Approve user ${user.username}?`)) {
                         approveMutation.mutate(user.id)
@@ -428,8 +458,10 @@ export default function Admin() {
                     title="Approve User"
                   >
                     <CheckCircleIcon className="w-6 h-6" />
-                  </button>
-                  <button
+                  </motion.button>
+                  <motion.button
+                    whileHover={{ scale: 1.1 }}
+                    whileTap={{ scale: 0.9 }}
                     onClick={() => {
                       if (confirm(`Reject and delete user ${user.username}?`)) {
                         rejectMutation.mutate(user.id)
@@ -440,16 +472,22 @@ export default function Admin() {
                     title="Reject User"
                   >
                     <XCircleIcon className="w-6 h-6" />
-                  </button>
+                  </motion.button>
                 </div>
               </motion.div>
             ))}
           </div>
-        </div>
-      )}
+        </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Users Table */}
-      <div className="glass-card overflow-hidden">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.3 }}
+        className="glass-card overflow-hidden"
+      >
         {isLoading ? (
           <div className="p-6 space-y-4">
             {[1, 2, 3, 4].map((i) => (
@@ -580,7 +618,7 @@ export default function Admin() {
             <p className="text-gray-400">No users found</p>
           </div>
         )}
-      </div>
+      </motion.div>
 
       {/* Create/Edit Modal */}
       <AnimatePresence>
@@ -589,13 +627,14 @@ export default function Admin() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
             onClick={() => setShowModal(false)}
           >
             <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
               onClick={(e) => e.stopPropagation()}
               className="glass-card w-full max-w-md"
             >
@@ -604,12 +643,14 @@ export default function Admin() {
                 <h2 className="text-xl font-semibold text-white">
                   {editingUser ? 'Edit User' : 'Add User'}
                 </h2>
-                <button
+                <motion.button
+                  whileHover={{ scale: 1.1 }}
+                  whileTap={{ scale: 0.9 }}
                   onClick={() => setShowModal(false)}
                   className="text-gray-400 hover:text-white"
                 >
                   <XMarkIcon className="w-6 h-6" />
-                </button>
+                </motion.button>
               </div>
 
               {/* Form */}

@@ -4,6 +4,12 @@ Chowkidaar NVR - Configuration Module
 from typing import List, Optional
 from pydantic_settings import BaseSettings
 from functools import lru_cache
+from pathlib import Path
+import os
+
+
+# Get project root directory (backend folder)
+PROJECT_ROOT = Path(__file__).parent.parent.parent.resolve()
 
 
 class Settings(BaseSettings):
@@ -38,10 +44,28 @@ class Settings(BaseSettings):
     stream_reconnect_delay: int = 5
     max_concurrent_streams: int = 10
     
-    # Storage
-    base_path: str = "/home/proxpc/NVR/backend"
-    events_storage_path: str = "/home/proxpc/NVR/backend/storage/events"
-    frames_storage_path: str = "/home/proxpc/NVR/backend/storage/frames"
+    # Storage - These will be computed based on project root
+    storage_base: str = "storage"
+    
+    @property
+    def base_path(self) -> str:
+        return str(PROJECT_ROOT)
+    
+    @property
+    def events_storage_path(self) -> str:
+        return str(PROJECT_ROOT / self.storage_base / "events")
+    
+    @property
+    def frames_storage_path(self) -> str:
+        return str(PROJECT_ROOT / self.storage_base / "frames")
+    
+    @property
+    def logs_path(self) -> str:
+        return str(PROJECT_ROOT / "logs")
+    
+    @property
+    def models_path(self) -> str:
+        return str(PROJECT_ROOT / "models")
     
     # CORS
     cors_origins: str = "*"
@@ -59,6 +83,19 @@ class Settings(BaseSettings):
     def yolo_classes_list(self) -> List[str]:
         return [cls.strip() for cls in self.yolo_classes.split(",")]
     
+    def ensure_directories(self) -> None:
+        """Create all required directories if they don't exist"""
+        directories = [
+            self.events_storage_path,
+            self.frames_storage_path,
+            self.logs_path,
+            self.models_path,
+            str(PROJECT_ROOT / self.storage_base / "thumbnails"),
+            str(PROJECT_ROOT / self.storage_base / "recordings"),
+        ]
+        for directory in directories:
+            Path(directory).mkdir(parents=True, exist_ok=True)
+    
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
@@ -70,3 +107,6 @@ def get_settings() -> Settings:
 
 
 settings = get_settings()
+
+# Auto-create directories on import
+settings.ensure_directories()

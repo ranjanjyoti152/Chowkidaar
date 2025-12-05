@@ -41,10 +41,9 @@ async def lifespan(app: FastAPI):
     """Application lifespan handler"""
     logger.info(f"🚀 Starting {settings.app_name} v{settings.app_version}")
     
-    # Create storage directories
-    Path(settings.events_storage_path).mkdir(parents=True, exist_ok=True)
-    Path(settings.frames_storage_path).mkdir(parents=True, exist_ok=True)
-    Path("logs").mkdir(exist_ok=True)
+    # Ensure all required directories exist (already done on config import, but double-check)
+    settings.ensure_directories()
+    logger.info(f"📁 Storage directories ready at: {settings.base_path}/storage")
     
     # Initialize database
     logger.info("Initializing database...")
