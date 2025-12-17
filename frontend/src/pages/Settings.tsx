@@ -27,6 +27,8 @@ interface YoloModel {
   type: string
   size: string
   path?: string
+  category?: string  // 'yolo' or 'owlv2'
+  description?: string
 }
 
 type Settings = SettingsData
@@ -54,6 +56,7 @@ const defaultSettings: Settings = {
     confidence_threshold: 0.5,
     enabled_classes: ['person', 'car', 'truck', 'dog', 'cat'],
     inference_device: 'cuda',
+    owlv2_queries: ['a person', 'a car', 'a fire', 'a lighter', 'a dog', 'a cat', 'a weapon', 'a knife', 'a suspicious object'],
   },
   vlm: {
     provider: 'ollama',
@@ -66,6 +69,8 @@ const defaultSettings: Settings = {
     gemini_model: 'gemini-2.0-flash-exp',
     auto_summarize: true,
     summarize_delay_seconds: 5,
+    safety_scan_enabled: true,
+    safety_scan_interval: 30,
   },
   storage: {
     recordings_path: '/data/recordings',
@@ -119,6 +124,10 @@ export default function Settings() {
   const [isUploading, setIsUploading] = useState(false)
   const [activeYoloModel, setActiveYoloModel] = useState<string>('')
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [newOwlQuery, setNewOwlQuery] = useState('')  // For adding new OWLv2 queries
+  
+  // Derive detector type from settings model (not separate state)
+  const detectorType = settings.detection.model.startsWith('owlv2') ? 'owlv2' : 'yolo'
   
   // Provider-specific states
   const [openaiModels, setOpenaiModels] = useState<string[]>([])
@@ -238,20 +247,48 @@ export default function Settings() {
     queryFn: async () => {
       try {
         const data = await settingsApi.get()
-        setSettings(data)
+        // Merge received data with defaults to ensure all fields exist
+        const mergedSettings: Settings = {
+          detection: {
+            ...defaultSettings.detection,
+            ...data.detection,
+          },
+          vlm: {
+            ...defaultSettings.vlm,
+            ...data.vlm,
+          },
+          storage: {
+            ...defaultSettings.storage,
+            ...data.storage,
+          },
+          notifications: {
+            ...defaultSettings.notifications,
+            ...data.notifications,
+            telegram: {
+              ...defaultSettings.notifications.telegram,
+              ...data.notifications?.telegram,
+            },
+            email: {
+              ...defaultSettings.notifications.email,
+              ...data.notifications?.email,
+            },
+          },
+        }
+        setSettings(mergedSettings)
         // Set active model from loaded settings
-        if (data.detection?.model) {
-          setActiveYoloModel(data.detection.model)
+        if (mergedSettings.detection?.model) {
+          setActiveYoloModel(mergedSettings.detection.model)
+          // detectorType is now derived from settings.detection.model automatically
         }
         // Fetch classes for the saved model
-        if (data.detection?.model) {
-          fetchModelClasses(data.detection.model)
+        if (mergedSettings.detection?.model) {
+          fetchModelClasses(mergedSettings.detection.model)
         }
         // Fetch Ollama models with saved URL
-        if (data.vlm?.ollama_url) {
-          fetchOllamaModels(data.vlm.ollama_url)
+        if (mergedSettings.vlm?.ollama_url) {
+          fetchOllamaModels(mergedSettings.vlm.ollama_url)
         }
-        return data
+        return mergedSettings
       } catch {
         // Only use defaults if fetch fails
         fetchOllamaModels(defaultSettings.vlm.ollama_url)
@@ -269,9 +306,34 @@ export default function Settings() {
     },
     onSuccess: (data) => {
       console.log('✅ Save successful, updating state')
-      setSettings(data)
-      // Don't invalidate - we already have the latest data from response
-      // queryClient.invalidateQueries({ queryKey: ['settings'] })
+      // Merge response with defaults to ensure all fields exist
+      const mergedSettings: Settings = {
+        detection: {
+          ...defaultSettings.detection,
+          ...data.detection,
+        },
+        vlm: {
+          ...defaultSettings.vlm,
+          ...data.vlm,
+        },
+        storage: {
+          ...defaultSettings.storage,
+          ...data.storage,
+        },
+        notifications: {
+          ...defaultSettings.notifications,
+          ...data.notifications,
+          telegram: {
+            ...defaultSettings.notifications.telegram,
+            ...data.notifications?.telegram,
+          },
+          email: {
+            ...defaultSettings.notifications.email,
+            ...data.notifications?.email,
+          },
+        },
+      }
+      setSettings(mergedSettings)
       toast.success('Settings saved successfully')
     },
     onError: (error) => {
@@ -380,12 +442,18 @@ export default function Settings() {
     try {
       await systemApi.activateYoloModel(modelName)
       setActiveYoloModel(modelName)
-      setSettings(prev => ({
-        ...prev,
-        detection: { ...prev.detection, model: modelName }
-      }))
-      toast.success(`Model "${modelName}" activated`)
-      fetchModelClasses(modelName)
+      // Update settings and save to database
+      const newSettings = {
+        ...settings,
+        detection: { ...settings.detection, model: modelName }
+      }
+      setSettings(newSettings)
+      // Auto-save to database after model activation
+      saveMutation.mutate(newSettings)
+      // Fetch model classes only for YOLO models (not OWLv2)
+      if (!modelName.startsWith('owlv2')) {
+        fetchModelClasses(modelName)
+      }
     } catch (error) {
       toast.error('Failed to activate model')
     }
@@ -470,12 +538,56 @@ export default function Settings() {
                   </span>
                 </div>
 
-                {/* YOLO Model Selection */}
+                {/* Detector Type Toggle - YOLO vs OWLv2 */}
+                <div className="p-4 rounded-xl bg-gradient-to-r from-blue-500/10 to-purple-500/10 border border-blue-500/20">
+                  <label className="text-sm font-medium text-gray-300 mb-3 block">
+                    Detection Engine
+                  </label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      onClick={() => {
+                        // Auto-select first YOLO model - activate and save
+                        const firstYolo = yoloModels.find(m => m.category !== 'owlv2')
+                        if (firstYolo) {
+                          handleActivateModel(firstYolo.name)
+                        }
+                      }}
+                      className={`p-4 rounded-xl border transition-all ${
+                        detectorType === 'yolo'
+                          ? 'bg-blue-500/20 border-blue-500/50 text-blue-300'
+                          : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/20'
+                      }`}
+                    >
+                      <div className="font-semibold mb-1">🎯 YOLO</div>
+                      <div className="text-xs opacity-70">Fast fixed-class detection (80 classes)</div>
+                    </button>
+                    <button
+                      onClick={() => {
+                        // Auto-select first OWLv2 model - activate and save
+                        const firstOwl = yoloModels.find(m => m.category === 'owlv2')
+                        if (firstOwl) {
+                          handleActivateModel(firstOwl.name)
+                        }
+                      }}
+                      className={`p-4 rounded-xl border transition-all ${
+                        detectorType === 'owlv2'
+                          ? 'bg-purple-500/20 border-purple-500/50 text-purple-300'
+                          : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/20'
+                      }`}
+                    >
+                      <div className="font-semibold mb-1">🦉 OWLv2</div>
+                      <div className="text-xs opacity-70">Open-vocabulary - detect anything by text</div>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Model Selection */}
                 <div className="p-4 rounded-xl bg-gradient-to-r from-primary-500/10 to-cyan-500/10 border border-primary-500/20">
                   <div className="flex items-center justify-between mb-4">
                     <label className="text-sm font-medium text-gray-300">
-                      YOLO Models
+                      {detectorType === 'yolo' ? 'YOLO Models' : 'OWLv2 Models'}
                     </label>
+                    {detectorType === 'yolo' && (
                     <div className="flex items-center gap-2">
                       <input
                         type="file"
@@ -497,10 +609,13 @@ export default function Settings() {
                         Upload Custom
                       </button>
                     </div>
+                    )}
                   </div>
                   
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                    {yoloModels.map((model) => (
+                    {yoloModels
+                      .filter(model => detectorType === 'owlv2' ? model.category === 'owlv2' : model.category !== 'owlv2')
+                      .map((model) => (
                       <div
                         key={model.name}
                         className={`relative p-3 rounded-xl transition-all border cursor-pointer group ${
@@ -509,11 +624,8 @@ export default function Settings() {
                             : 'bg-white/5 border-white/10 hover:border-white/20 hover:bg-white/10'
                         }`}
                         onClick={() => {
-                          setSettings({
-                            ...settings,
-                            detection: { ...settings.detection, model: model.name },
-                          })
-                          fetchModelClasses(model.name)
+                          // Activate the model and save to database
+                          handleActivateModel(model.name)
                         }}
                       >
                         <div className="flex items-start justify-between">
@@ -521,9 +633,12 @@ export default function Settings() {
                             <p className={`font-medium truncate ${
                               settings.detection.model === model.name ? 'text-primary-400' : 'text-gray-200'
                             }`}>
-                              {model.name.split('/').pop()?.replace('.pt', '')}
+                              {model.display_name || model.name.split('/').pop()?.replace('.pt', '')}
                             </p>
                             <p className="text-xs text-gray-500 mt-0.5">{model.size}</p>
+                            {model.description && (
+                              <p className="text-xs text-gray-500 mt-1 line-clamp-2">{model.description}</p>
+                            )}
                           </div>
                           {model.type === 'custom' && (
                             <button
@@ -539,11 +654,13 @@ export default function Settings() {
                         </div>
                         <div className="flex items-center gap-2 mt-2">
                           <span className={`text-xs px-2 py-0.5 rounded-full ${
-                            model.type === 'builtin' 
-                              ? 'bg-blue-500/20 text-blue-400' 
-                              : 'bg-purple-500/20 text-purple-400'
+                            model.category === 'owlv2'
+                              ? 'bg-purple-500/20 text-purple-400'
+                              : model.type === 'builtin' 
+                                ? 'bg-blue-500/20 text-blue-400' 
+                                : 'bg-cyan-500/20 text-cyan-400'
                           }`}>
-                            {model.type}
+                            {model.category === 'owlv2' ? 'OWLv2' : model.type}
                           </span>
                           {settings.detection.model === model.name && (
                             <button
@@ -609,7 +726,8 @@ export default function Settings() {
                   </div>
                 </div>
 
-                {/* Detection Classes */}
+                {/* Detection Classes - Only for YOLO */}
+                {detectorType === 'yolo' && (
                 <div>
                   <div className="flex items-center justify-between mb-3">
                     <label className="text-sm font-medium text-gray-400">
@@ -669,6 +787,125 @@ export default function Settings() {
                     ))}
                   </div>
                 </div>
+                )}
+
+                {/* OWLv2 Custom Queries - Only for OWLv2 */}
+                {detectorType === 'owlv2' && (
+                <div className="p-4 rounded-xl bg-gradient-to-r from-purple-500/10 to-pink-500/10 border border-purple-500/20">
+                  <div className="flex items-center justify-between mb-3">
+                    <label className="text-sm font-medium text-gray-300">
+                      🦉 OWLv2 Detection Queries
+                    </label>
+                    <span className="text-xs text-gray-500">
+                      {settings.detection.owlv2_queries?.length || 0} queries
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-400 mb-3">
+                    Enter text descriptions of objects you want to detect. OWLv2 can find anything you describe!
+                  </p>
+                  
+                  {/* Add new query */}
+                  <div className="flex gap-2 mb-3">
+                    <input
+                      type="text"
+                      value={newOwlQuery}
+                      onChange={(e) => setNewOwlQuery(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && newOwlQuery.trim()) {
+                          const queries = settings.detection.owlv2_queries || []
+                          if (!queries.includes(newOwlQuery.trim())) {
+                            setSettings({
+                              ...settings,
+                              detection: {
+                                ...settings.detection,
+                                owlv2_queries: [...queries, newOwlQuery.trim()]
+                              }
+                            })
+                          }
+                          setNewOwlQuery('')
+                        }
+                      }}
+                      placeholder="e.g., 'a person wearing a red shirt', 'a delivery package'"
+                      className="input flex-1 text-sm"
+                    />
+                    <button
+                      onClick={() => {
+                        if (newOwlQuery.trim()) {
+                          const queries = settings.detection.owlv2_queries || []
+                          if (!queries.includes(newOwlQuery.trim())) {
+                            setSettings({
+                              ...settings,
+                              detection: {
+                                ...settings.detection,
+                                owlv2_queries: [...queries, newOwlQuery.trim()]
+                              }
+                            })
+                          }
+                          setNewOwlQuery('')
+                        }
+                      }}
+                      className="btn-primary text-sm px-4"
+                    >
+                      Add
+                    </button>
+                  </div>
+
+                  {/* Query list */}
+                  <div className="flex flex-wrap gap-2 max-h-48 overflow-y-auto">
+                    {(settings.detection.owlv2_queries || []).map((query, index) => (
+                      <div
+                        key={index}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-purple-500/20 text-purple-300 border border-purple-500/30 text-sm"
+                      >
+                        <span>{query}</span>
+                        <button
+                          onClick={() => {
+                            const queries = settings.detection.owlv2_queries || []
+                            setSettings({
+                              ...settings,
+                              detection: {
+                                ...settings.detection,
+                                owlv2_queries: queries.filter((_, i) => i !== index)
+                              }
+                            })
+                          }}
+                          className="ml-1 text-purple-400 hover:text-red-400 transition-colors"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Quick add suggestions */}
+                  <div className="mt-3 pt-3 border-t border-white/10">
+                    <p className="text-xs text-gray-500 mb-2">Quick add:</p>
+                    <div className="flex flex-wrap gap-1">
+                      {['a person running', 'a fire or flames', 'a weapon', 'a package', 'a vehicle', 'smoke'].map(suggestion => (
+                        <button
+                          key={suggestion}
+                          onClick={() => {
+                            const queries = settings.detection.owlv2_queries || []
+                            if (!queries.includes(suggestion)) {
+                              setSettings({
+                                ...settings,
+                                detection: {
+                                  ...settings.detection,
+                                  owlv2_queries: [...queries, suggestion]
+                                }
+                              })
+                            }
+                          }}
+                          disabled={(settings.detection.owlv2_queries || []).includes(suggestion)}
+                          className="text-xs px-2 py-1 rounded bg-white/5 text-gray-400 hover:bg-white/10 hover:text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                        >
+                          + {suggestion}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                )}
               </div>
             )}
 

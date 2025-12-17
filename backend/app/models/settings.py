@@ -29,6 +29,12 @@ class UserSettings(Base):
     detection_device: Mapped[str] = mapped_column(String(50), default="cuda")
     enabled_classes: Mapped[list] = mapped_column(JSON, default=list)
     
+    # OWLv2 custom queries for open-vocabulary detection
+    owlv2_queries: Mapped[list] = mapped_column(JSON, default=lambda: [
+        "a person", "a car", "a fire", "a lighter", "a dog", "a cat", 
+        "a weapon", "a knife", "a suspicious object"
+    ])
+    
     # VLM provider settings
     vlm_provider: Mapped[str] = mapped_column(String(50), default="ollama")  # 'ollama', 'openai', 'gemini'
     

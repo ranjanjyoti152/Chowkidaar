@@ -370,6 +370,7 @@ export interface SettingsData {
     confidence_threshold: number
     enabled_classes: string[]
     inference_device: string
+    owlv2_queries: string[]  // Custom queries for OWLv2 open-vocabulary detection
   }
   vlm: {
     provider: string  // 'ollama' | 'openai' | 'gemini'
@@ -382,6 +383,8 @@ export interface SettingsData {
     gemini_model: string
     auto_summarize: boolean
     summarize_delay_seconds: number
+    safety_scan_enabled?: boolean
+    safety_scan_interval?: number
   }
   storage: {
     recordings_path: string

@@ -3,7 +3,10 @@ import { useAuthStore } from '../store/authStore'
 
 // Backend server URL from .env
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1'
-export const WS_BASE_URL = import.meta.env.VITE_WS_BASE_URL || 'ws://localhost:8001/ws'
+
+// WebSocket URL - construct from window.location for external access
+const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+export const WS_BASE_URL = import.meta.env.VITE_WS_BASE_URL || `${wsProtocol}//${window.location.host}/ws`
 
 console.log('🔗 API Base URL:', API_BASE_URL)
 
@@ -46,17 +49,17 @@ api.interceptors.response.use(
   async (error) => {
     if (error.response?.status === 401) {
       const authStore = useAuthStore.getState()
-      
+
       // Try to refresh token
       if (authStore.refreshToken) {
         try {
           const response = await axios.post(`${API_BASE_URL}/auth/refresh`, {
             refresh_token: authStore.refreshToken,
           })
-          
+
           const { access_token, refresh_token } = response.data
           authStore.setTokens(access_token, refresh_token)
-          
+
           // Retry the original request
           error.config.headers.Authorization = `Bearer ${access_token}`
           return api.request(error.config)
@@ -67,7 +70,7 @@ api.interceptors.response.use(
         authStore.logout()
       }
     }
-    
+
     return Promise.reject(error)
   }
 )

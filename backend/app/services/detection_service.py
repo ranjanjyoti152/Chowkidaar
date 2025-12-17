@@ -15,6 +15,7 @@ from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from sqlalchemy import select, update
 from app.services.yolo_detector import get_detector
+from app.services.owlv2_detector import get_owlv2_detector, OWLv2Detector
 from app.services.stream_handler import get_stream_manager
 from app.services.vlm_service import get_unified_vlm_service
 from app.services.notification_service import send_event_notification
@@ -40,6 +41,13 @@ class DetectionService:
         self._vlm_threat_cooldown_seconds = 180  # 3 minutes between same confirmed threat alerts
         self._pending_vlm_threats: Dict[int, dict] = {}  # camera_id -> pending threat needing confirmation
         self._vlm_confirmation_required = 2  # Need 2 consecutive detections to confirm (anti-hallucination)
+        
+        # Settings cache to reduce database queries
+        self._settings_cache: Dict[int, Dict] = {}  # user_id -> settings dict
+        self._settings_cache_time: Dict[int, datetime] = {}  # user_id -> last cache time
+        self._vlm_settings_cache: Dict[int, Dict] = {}  # user_id -> VLM settings dict
+        self._vlm_settings_cache_time: Dict[int, datetime] = {}  # user_id -> last VLM cache time
+        self._settings_cache_ttl = 60  # Cache settings for 60 seconds
     
     async def start(self):
         """Start the detection service"""
@@ -64,6 +72,25 @@ class DetectionService:
             task.cancel()
         self._camera_tasks.clear()
         logger.info("Detection service stopped")
+    
+    async def restart_all_detection_loops(self):
+        """Restart all detection loops to pick up new model settings"""
+        logger.info("🔄 Restarting all detection loops to pick up new model...")
+        
+        # Cancel all existing camera tasks
+        for camera_id, task in list(self._camera_tasks.items()):
+            logger.info(f"Cancelling detection loop for camera {camera_id}")
+            task.cancel()
+            try:
+                # Wait with timeout to avoid hanging
+                await asyncio.wait_for(task, timeout=2.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
+            except Exception as e:
+                logger.warning(f"Error cancelling task for camera {camera_id}: {e}")
+        
+        self._camera_tasks.clear()
+        logger.info("✅ All detection loops cancelled - they will respawn with new model")
     
     async def _main_loop(self):
         """Main loop that monitors cameras"""
@@ -118,10 +145,31 @@ class DetectionService:
         device = user_settings.get("device", "cuda") if user_settings else "cuda"
         confidence = user_settings.get("confidence", 0.5) if user_settings else 0.5
         
-        # Initialize detector with user's model
-        detector = await get_detector()
-        await detector.load_model(model_name, device)
-        detector.confidence_threshold = confidence
+        logger.info(f"📷 Camera {camera_id}: Starting detection with model={model_name}, device={device}, confidence={confidence}")
+        
+        # Check if using OWLv2 (open-vocabulary detection)
+        use_owlv2 = model_name.startswith("owlv2")
+        owlv2_detector = None
+        yolo_detector = None
+        
+        if use_owlv2:
+            # Initialize OWLv2 detector
+            owlv2_detector = await get_owlv2_detector()
+            await owlv2_detector.initialize(model_name=model_name, device=device)
+            owlv2_detector.confidence_threshold = confidence
+            
+            # Set custom queries from user settings if available
+            custom_queries = user_settings.get("owlv2_queries", []) if user_settings else []
+            if custom_queries:
+                owlv2_detector.set_custom_queries(custom_queries)
+            
+            logger.info(f"🦉 Started OWLv2 detection loop for camera {camera_id}")
+            logger.info(f"🦉 Active queries: {owlv2_detector.get_active_queries()}")
+        else:
+            # Initialize YOLO detector
+            yolo_detector = await get_detector()
+            await yolo_detector.load_model(model_name, device)
+            yolo_detector.confidence_threshold = confidence
         
         # Configure VLM with user's settings
         vlm_settings = await self._get_vlm_settings(user_id)
@@ -140,7 +188,8 @@ class DetectionService:
             )
             logger.info(f"VLM configured: provider={provider}")
         
-        logger.info(f"🔍 Started detection loop for camera {camera_id} with model {model_name} on {device}")
+        detector_name = "OWLv2" if use_owlv2 else "YOLO"
+        logger.info(f"🔍 Started {detector_name} detection loop for camera {camera_id} with model {model_name} on {device}")
         
         frame_count = 0
         null_frame_count = 0
@@ -171,15 +220,26 @@ class DetectionService:
                 # Refresh enabled classes periodically (every 100 frames)
                 if frame_count % 100 == 0:
                     enabled_classes = await self._get_enabled_classes(user_id)
+                    # For OWLv2, also refresh custom queries
+                    if use_owlv2 and owlv2_detector:
+                        user_settings = await self._get_user_settings(user_id)
+                        custom_queries = user_settings.get("owlv2_queries", []) if user_settings else []
+                        if custom_queries:
+                            owlv2_detector.set_custom_queries(custom_queries)
                     logger.debug(f"Camera {camera_id}: Refreshed enabled classes: {enabled_classes}")
                 
-                # Always fetch enabled classes to ensure latest settings (cached every few seconds)
-                enabled_classes = await self._get_enabled_classes(user_id)
+                logger.info(f"🔎 Camera {camera_id}: Running {detector_name} detection on frame {frame_count}")
                 
-                logger.info(f"🔎 Camera {camera_id}: Running detection on frame {frame_count}")
+                # Run detection based on model type
+                if use_owlv2 and owlv2_detector:
+                    # OWLv2 open-vocabulary detection
+                    detection_result = await owlv2_detector.detect(frame)
+                    active_detector = owlv2_detector
+                else:
+                    # YOLO detection
+                    detection_result = await yolo_detector.detect(frame)
+                    active_detector = yolo_detector
                 
-                # Run detection
-                detection_result = await detector.detect(frame)
                 detections = detection_result.get("objects", [])
                 
                 logger.info(f"Camera {camera_id}: Found {len(detections)} objects")
@@ -187,14 +247,16 @@ class DetectionService:
                 if not detections:
                     continue
                 
-                # Filter for significant detections (confidence > 0.5)
-                significant = [d for d in detections if d["confidence"] > 0.5]
+                # Filter for significant detections
+                # OWLv2 uses lower thresholds, so adjust accordingly
+                min_confidence = 0.15 if use_owlv2 else 0.5
+                significant = [d for d in detections if d["confidence"] > min_confidence]
                 if not significant:
-                    logger.debug(f"Camera {camera_id}: No significant detections (confidence > 0.5)")
+                    logger.debug(f"Camera {camera_id}: No significant detections (confidence > {min_confidence})")
                     continue
                 
-                # Filter by enabled classes
-                if enabled_classes:
+                # Filter by enabled classes (only for YOLO, OWLv2 uses queries)
+                if not use_owlv2 and enabled_classes:
                     filtered = [d for d in significant if d["class_name"].lower() in enabled_classes]
                     if not filtered:
                         logger.debug(f"Camera {camera_id}: No detections matching enabled classes. Detected: {[d['class_name'] for d in significant]}")
@@ -205,7 +267,7 @@ class DetectionService:
                 
                 # Check cooldown and create events
                 await self._process_detections(
-                    camera_id, user_id, frame, significant, detector
+                    camera_id, user_id, frame, significant, active_detector
                 )
                 
                 # Periodic VLM safety scan (even if YOLO missed something)
@@ -229,27 +291,46 @@ class DetectionService:
         logger.info(f"Stopped detection loop for camera {camera_id}")
     
     async def _get_enabled_classes(self, user_id: int) -> Set[str]:
-        """Get user's enabled detection classes from settings"""
+        """Get user's enabled detection classes from settings using cache"""
         try:
-            async with AsyncSessionLocal() as db:
-                # import at top
-                result = await db.execute(
-                    select(UserSettings).where(UserSettings.user_id == user_id)
-                )
-                user_settings = result.scalar_one_or_none()
-                
-                if user_settings and user_settings.enabled_classes:
-                    # Convert to lowercase set for comparison
-                    return set(c.lower() for c in user_settings.enabled_classes)
-                
-                # Default: all COCO classes if no settings
-                return set()
+            # Use cached settings instead of querying database
+            settings = await self._get_user_settings(user_id)
+            if settings and settings.get("enabled_classes"):
+                # Convert to lowercase set for comparison
+                return set(c.lower() for c in settings["enabled_classes"])
+            
+            # Default: empty set if no settings
+            return set()
         except Exception as e:
             logger.error(f"Failed to get enabled classes for user {user_id}: {e}")
             return set()
     
+    def _is_cache_valid(self, user_id: int) -> bool:
+        """Check if settings cache is still valid"""
+        if user_id not in self._settings_cache_time:
+            return False
+        cache_age = (datetime.now() - self._settings_cache_time[user_id]).total_seconds()
+        return cache_age < self._settings_cache_ttl
+    
+    def _invalidate_cache(self, user_id: int = None):
+        """Invalidate settings cache for a user or all users"""
+        if user_id:
+            self._settings_cache.pop(user_id, None)
+            self._settings_cache_time.pop(user_id, None)
+            self._vlm_settings_cache.pop(user_id, None)
+            self._vlm_settings_cache_time.pop(user_id, None)
+        else:
+            self._settings_cache.clear()
+            self._settings_cache_time.clear()
+            self._vlm_settings_cache.clear()
+            self._vlm_settings_cache_time.clear()
+    
     async def _get_user_settings(self, user_id: int) -> Optional[Dict[str, Any]]:
-        """Get user's detection settings from database"""
+        """Get user's detection settings from database with caching"""
+        # Check cache first
+        if self._is_cache_valid(user_id) and user_id in self._settings_cache:
+            return self._settings_cache.get(user_id)
+        
         try:
             async with AsyncSessionLocal() as db:
                 # import at top
@@ -259,19 +340,38 @@ class DetectionService:
                 user_settings = result.scalar_one_or_none()
                 
                 if user_settings:
-                    return {
+                    settings_dict = {
                         "model": user_settings.detection_model,
                         "device": user_settings.detection_device,
                         "confidence": user_settings.detection_confidence,
-                        "enabled_classes": user_settings.enabled_classes or []
+                        "enabled_classes": user_settings.enabled_classes or [],
+                        "owlv2_queries": getattr(user_settings, 'owlv2_queries', [
+                            "a person", "a car", "a fire", "a lighter", "a dog", "a cat", 
+                            "a weapon", "a knife", "a suspicious object"
+                        ]) or []
                     }
+                    # Update cache
+                    self._settings_cache[user_id] = settings_dict
+                    self._settings_cache_time[user_id] = datetime.now()
+                    return settings_dict
                 return None
         except Exception as e:
             logger.error(f"Failed to get user settings for user {user_id}: {e}")
             return None
     
+    def _is_vlm_cache_valid(self, user_id: int) -> bool:
+        """Check if VLM settings cache is still valid"""
+        if user_id not in self._vlm_settings_cache_time:
+            return False
+        cache_age = (datetime.now() - self._vlm_settings_cache_time[user_id]).total_seconds()
+        return cache_age < self._settings_cache_ttl
+    
     async def _get_vlm_settings(self, user_id: int) -> Optional[Dict[str, Any]]:
-        """Get user's VLM settings from database"""
+        """Get user's VLM settings from database with caching"""
+        # Check cache first
+        if self._is_vlm_cache_valid(user_id) and user_id in self._vlm_settings_cache:
+            return self._vlm_settings_cache.get(user_id)
+        
         try:
             async with AsyncSessionLocal() as db:
                 # import at top
@@ -281,7 +381,7 @@ class DetectionService:
                 user_settings = result.scalar_one_or_none()
                 
                 if user_settings:
-                    return {
+                    vlm_settings = {
                         "provider": getattr(user_settings, 'vlm_provider', 'ollama'),
                         "url": user_settings.vlm_url,
                         "model": user_settings.vlm_model,
@@ -295,6 +395,10 @@ class DetectionService:
                         "gemini_api_key": getattr(user_settings, 'gemini_api_key', None),
                         "gemini_model": getattr(user_settings, 'gemini_model', 'gemini-2.0-flash-exp')
                     }
+                    # Update cache
+                    self._vlm_settings_cache[user_id] = vlm_settings
+                    self._vlm_settings_cache_time[user_id] = datetime.now()
+                    return vlm_settings
                 return None
         except Exception as e:
             logger.error(f"Failed to get VLM settings for user {user_id}: {e}")
@@ -1091,12 +1195,13 @@ DESCRIPTION: [What you ACTUALLY see - be specific]"""
             logger.error(f"VLM Safety Scan error for camera {camera_id}: {e}")
 
 
-# Global instance
+# Global singleton instance for synchronous access
+detection_service = DetectionService()
+
+# Alternative async getter (for backwards compatibility)
 _detection_service: Optional[DetectionService] = None
 
 
 async def get_detection_service() -> DetectionService:
-    global _detection_service
-    if _detection_service is None:
-        _detection_service = DetectionService()
-    return _detection_service
+    """Async getter for detection service (returns the global singleton)"""
+    return detection_service

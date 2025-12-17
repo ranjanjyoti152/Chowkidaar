@@ -255,6 +255,9 @@ CREATE TABLE IF NOT EXISTS user_settings (
     detection_device VARCHAR(50) DEFAULT 'cuda',
     enabled_classes JSONB DEFAULT '["person", "car", "truck", "dog", "cat"]',
     
+    -- OWLv2 custom queries for open-vocabulary detection
+    owlv2_queries JSONB DEFAULT '["a person", "a car", "a fire", "a lighter", "a dog", "a cat", "a weapon", "a knife", "a suspicious object"]',
+    
     -- VLM Provider settings
     vlm_provider VARCHAR(50) DEFAULT 'ollama',        -- 'ollama', 'openai', 'gemini'
     

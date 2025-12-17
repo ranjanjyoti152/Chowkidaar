@@ -18,6 +18,7 @@ from app.services.yolo_detector import get_detector
 from app.services.stream_handler import get_stream_manager
 from app.services.vlm_service import get_unified_vlm_service
 from app.services.detection_service import get_detection_service
+from app.services.owlv2_detector import OWLv2Detector
 from sqlalchemy import select
 
 
@@ -59,6 +60,15 @@ async def lifespan(app: FastAPI):
             logger.warning("⚠️ YOLO detector failed to initialize")
     except Exception as e:
         logger.error(f"❌ YOLO detector error: {e}")
+    
+    # Pre-download OWLv2 models (if not cached)
+    logger.info("Checking OWLv2 models...")
+    try:
+        # Pre-download base model (most commonly used)
+        await OWLv2Detector.preload_model("owlv2-base")
+        logger.info("✅ OWLv2 models ready")
+    except Exception as e:
+        logger.warning(f"⚠️ OWLv2 preload skipped: {e}")
     
     # Check VLM service connection
     logger.info("Checking VLM service connection...")
@@ -160,7 +170,7 @@ async def lifespan(app: FastAPI):
     await close_db()
     
     # Close VLM service
-    vlm_service = await get_vlm_service()
+    vlm_service = get_unified_vlm_service()
     await vlm_service.close()
     
     logger.info("👋 Goodbye!")

@@ -11,6 +11,11 @@ class DetectionSettings(BaseModel):
     confidence_threshold: float = 0.5
     enabled_classes: List[str] = ["person", "car", "truck", "dog", "cat"]
     inference_device: str = "cuda"
+    # OWLv2 custom queries for open-vocabulary detection
+    owlv2_queries: List[str] = [
+        "a person", "a car", "a fire", "a lighter", "a dog", "a cat", 
+        "a weapon", "a knife", "a suspicious object"
+    ]
 
 
 class VLMSettings(BaseModel):

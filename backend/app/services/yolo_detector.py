@@ -67,16 +67,22 @@ class YOLODetector:
             self.device = device
             self.model_name = model_name
             
-            # Build model path
-            model_path = Path(settings.base_path) / f"{model_name}.pt"
+            # Build model path - check multiple locations
+            # 1. Check in models directory (for custom uploaded models)
+            model_path = Path(settings.models_path) / f"{model_name}.pt"
             if not model_path.exists():
-                # Try without base path
+                # 2. Check in base path (for built-in models like yolov8n.pt)
+                model_path = Path(settings.base_path) / f"{model_name}.pt"
+            if not model_path.exists():
+                # 3. Try as direct path (like yolov8n.pt which ultralytics can download)
                 model_path = Path(f"{model_name}.pt")
             
-            if not model_path.exists():
-                logger.error(f"Model file not found: {model_path}")
+            if not model_path.exists() and not model_name.startswith("yolov8"):
+                # For custom models, require the file to exist
+                logger.error(f"Model file not found: {model_name}.pt")
                 return False
             
+            # For yolov8 models, ultralytics will auto-download if not found
             self.model_path = str(model_path)
             logger.info(f"🔄 Loading YOLO model: {model_name} from {model_path} on {device}")
             

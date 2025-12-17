@@ -476,6 +476,125 @@
     box-shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.5);
     animation: slideInRight 0.3s ease-out;
   }
+
+  /* ========== CHAT UI COMPONENTS ========== */
+  
+  .chat-bubble-user {
+    @apply relative;
+    background: linear-gradient(135deg, rgb(6, 182, 212) 0%, rgb(59, 130, 246) 100%);
+    box-shadow: 0 4px 20px -5px rgba(6, 182, 212, 0.4);
+  }
+
+  .chat-bubble-user::before {
+    content: '';
+    @apply absolute inset-0 rounded-2xl pointer-events-none;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.15) 0%, transparent 50%);
+  }
+
+  .chat-bubble-assistant {
+    @apply relative;
+    background: rgba(30, 41, 59, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+  }
+
+  .chat-bubble-assistant::before {
+    content: '';
+    @apply absolute inset-0 rounded-2xl pointer-events-none;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, transparent 50%);
+  }
+
+  .chat-input-glow {
+    @apply relative;
+  }
+
+  .chat-input-glow::before {
+    content: '';
+    @apply absolute -inset-1 rounded-2xl pointer-events-none opacity-0 transition-opacity duration-300;
+    background: linear-gradient(135deg, rgba(6, 182, 212, 0.3) 0%, rgba(59, 130, 246, 0.3) 100%);
+    filter: blur(8px);
+  }
+
+  .chat-input-glow:focus-within::before {
+    @apply opacity-100;
+  }
+
+  /* Typing animation */
+  @keyframes typingDot {
+    0%, 100% {
+      transform: translateY(0);
+      opacity: 0.5;
+    }
+    50% {
+      transform: translateY(-4px);
+      opacity: 1;
+    }
+  }
+
+  .typing-dot {
+    animation: typingDot 1.4s ease-in-out infinite;
+  }
+
+  .typing-dot:nth-child(2) {
+    animation-delay: 0.2s;
+  }
+
+  .typing-dot:nth-child(3) {
+    animation-delay: 0.4s;
+  }
+
+  /* Chat scroll shadow */
+  .chat-scroll-shadow {
+    mask-image: linear-gradient(to bottom, transparent 0%, black 5%, black 95%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 5%, black 95%, transparent 100%);
+  }
+
+  /* Message reveal animation */
+  @keyframes messageReveal {
+    from {
+      opacity: 0;
+      transform: translateY(10px) scale(0.95);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  .message-reveal {
+    animation: messageReveal 0.3s ease-out forwards;
+  }
+
+  /* Floating animation for welcome icon */
+  @keyframes floatBounce {
+    0%, 100% {
+      transform: translateY(0) rotate(0deg);
+    }
+    25% {
+      transform: translateY(-8px) rotate(3deg);
+    }
+    75% {
+      transform: translateY(-8px) rotate(-3deg);
+    }
+  }
+
+  .float-bounce {
+    animation: floatBounce 4s ease-in-out infinite;
+  }
+
+  /* Pulse glow for online indicator */
+  @keyframes pulseGlow {
+    0%, 100% {
+      box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.5);
+    }
+    50% {
+      box-shadow: 0 0 0 8px rgba(34, 197, 94, 0);
+    }
+  }
+
+  .pulse-glow {
+    animation: pulseGlow 2s ease-in-out infinite;
+  }
 }
 
 @layer utilities {
