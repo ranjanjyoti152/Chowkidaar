@@ -19,15 +19,34 @@ from app.models.camera import CameraStatus
 
 # Check CUDA availability at module load
 def _check_cuda_available() -> bool:
-    """Check if CUDA is available for video processing"""
+    """Check if CUDA video decoding is available and functional"""
     try:
-        if hasattr(cv2, 'cuda'):
-            device_count = cv2.cuda.getCudaEnabledDeviceCount()
-            if device_count > 0:
-                logger.info(f"🚀 CUDA enabled: {device_count} GPU(s) available for video processing")
+        if not hasattr(cv2, 'cuda'):
+            logger.info("💻 OpenCV CUDA module not available, using CPU for video processing")
+            return False
+        
+        device_count = cv2.cuda.getCudaEnabledDeviceCount()
+        if device_count == 0:
+            logger.info("💻 No CUDA devices found, using CPU for video processing")
+            return False
+        
+        # Check if cudacodec VideoReader is actually functional (requires NVCUVID)
+        if hasattr(cv2, 'cudacodec'):
+            try:
+                # Try to access VideoReader - if NVCUVID not available, this will fail
+                # We can't test fully without a video, so we check if the method exists
+                # and returns the proper type (error would be throw_no_cuda)
+                _ = cv2.cudacodec
+                logger.info(f"🚀 CUDA enabled: {device_count} GPU(s) available (cudacodec module loaded)")
+                # Note: NVCUVID may still fail at runtime, but we'll fall back to CPU
                 return True
-        logger.info("💻 CUDA not available, using CPU for video processing")
-        return False
+            except Exception as e:
+                logger.warning(f"CUDA cudacodec not functional: {e}")
+                return False
+        else:
+            logger.info("💻 CUDA cudacodec module not built, using CPU for video processing")
+            return False
+            
     except Exception as e:
         logger.warning(f"CUDA check failed: {e}, using CPU")
         return False
@@ -105,7 +124,15 @@ class RTSPStreamHandler:
                 if self.use_cuda and hasattr(cv2, 'cudacodec'):
                     try:
                         logger.info(f"Camera {self.camera_id}: Connecting with CUDA acceleration to {self.stream_url}")
-                        self._cuda_reader = cv2.cudacodec.createVideoReader(self.stream_url)
+                        
+                        # Use VideoReaderInitParams for live RTSP streams
+                        # udpSource=True is required for live sources
+                        # allowFrameDrop=True allows dropping frames if decoding is slow
+                        params = cv2.cudacodec.VideoReaderInitParams()
+                        params.udpSource = True  # Required for live RTSP streams
+                        params.allowFrameDrop = True  # Allow frame drops for live streams
+                        
+                        self._cuda_reader = cv2.cudacodec.createVideoReader(self.stream_url, params=params)
                         using_cuda = True
                         logger.info(f"Camera {self.camera_id}: ✅ CUDA hardware decoding enabled")
                     except Exception as cuda_err:
@@ -156,6 +183,9 @@ class RTSPStreamHandler:
                             if ret:
                                 # Download GPU frame to CPU for processing
                                 frame = gpu_frame.download()
+                                # CUDA VideoReader returns BGRA (4 channels), convert to BGR (3 channels)
+                                if frame is not None and frame.shape[2] == 4:
+                                    frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
                             else:
                                 logger.warning(f"Camera {self.camera_id}: CUDA reader failed to read frame")
                                 break

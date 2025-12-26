@@ -29,8 +29,8 @@ const containerVariants = {
 
 const itemVariants = {
   hidden: { opacity: 0, y: 20 },
-  visible: { 
-    opacity: 1, 
+  visible: {
+    opacity: 1,
     y: 0,
     transition: { duration: 0.3, ease: 'easeOut' }
   }
@@ -96,7 +96,7 @@ export default function Dashboard() {
   return (
     <div className="page-container">
       {/* Header */}
-      <motion.div 
+      <motion.div
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
         className="page-header"
@@ -108,7 +108,7 @@ export default function Dashboard() {
       </motion.div>
 
       {/* Stats Grid */}
-      <motion.div 
+      <motion.div
         variants={containerVariants}
         initial="hidden"
         animate="visible"
@@ -124,7 +124,7 @@ export default function Dashboard() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-gray-400 font-medium">{stat.name}</p>
-                <motion.p 
+                <motion.p
                   key={stat.value}
                   initial={{ opacity: 0, scale: 0.5 }}
                   animate={{ opacity: 1, scale: 1 }}
@@ -147,7 +147,7 @@ export default function Dashboard() {
       {/* Main Content Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Camera Feeds */}
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.3 }}
@@ -167,8 +167,8 @@ export default function Dashboard() {
             ) : cameras && cameras.length > 0 ? (
               <div className="grid grid-cols-2 gap-4">
                 {cameras.slice(0, 4).map((camera, idx) => (
-                  <motion.div 
-                    key={camera.id} 
+                  <motion.div
+                    key={camera.id}
                     initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
                     transition={{ delay: idx * 0.1 }}
@@ -177,7 +177,7 @@ export default function Dashboard() {
                   >
                     {camera.status === 'online' ? (
                       <img
-                        src={`${cameraApi.getStreamUrl(camera.id)}?token=${token}`}
+                        src={`${cameraApi.getStreamUrl(camera.id)}&token=${token}`}
                         alt={camera.name}
                         className="w-full h-full object-cover"
                       />
@@ -193,11 +193,10 @@ export default function Dashboard() {
                             {camera.name}
                           </span>
                           <span
-                            className={`w-2 h-2 rounded-full ${
-                              camera.status === 'online'
+                            className={`w-2 h-2 rounded-full ${camera.status === 'online'
                                 ? 'bg-green-400 shadow-lg shadow-green-400/50'
                                 : 'bg-gray-500'
-                            }`}
+                              }`}
                           />
                         </div>
                       </div>
@@ -215,7 +214,7 @@ export default function Dashboard() {
         </motion.div>
 
         {/* Recent Events */}
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.4 }}
@@ -255,9 +254,8 @@ export default function Dashboard() {
                         }}
                       />
                     ) : (
-                      <div className={`w-full h-full flex items-center justify-center ${
-                        event.is_acknowledged ? 'bg-green-500/20' : 'bg-red-500/20'
-                      }`}>
+                      <div className={`w-full h-full flex items-center justify-center ${event.is_acknowledged ? 'bg-green-500/20' : 'bg-red-500/20'
+                        }`}>
                         <ExclamationTriangleIcon className="w-6 h-6 text-gray-500" />
                       </div>
                     )}
@@ -289,7 +287,7 @@ export default function Dashboard() {
 
       {/* System Stats */}
       {systemStats && (
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.5 }}

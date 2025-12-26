@@ -125,7 +125,7 @@ export default function Cameras() {
               <div className="relative aspect-video bg-dark-400">
                 {camera.status === 'online' ? (
                   <img
-                    src={`${cameraApi.getStreamUrl(camera.id)}?token=${token}`}
+                    src={`${cameraApi.getStreamUrl(camera.id)}&token=${token}`}
                     alt={camera.name}
                     className="w-full h-full object-cover"
                   />
@@ -134,7 +134,7 @@ export default function Cameras() {
                     <VideoCameraIcon className="w-16 h-16 text-gray-600" />
                   </div>
                 )}
-                
+
                 {/* Status Badge */}
                 <div className="absolute top-3 left-3">
                   <span className={`badge ${statusConfig[camera.status].color} text-white border-none`}>
@@ -380,7 +380,7 @@ function CameraModal({
               🧠 AI Context Settings
               <span className="text-xs font-normal text-gray-400">(helps AI decide severity)</span>
             </h3>
-            
+
             <div className="space-y-3">
               <div>
                 <label className="label text-xs">Location Type</label>
@@ -455,14 +455,12 @@ function CameraModal({
                 className="sr-only"
               />
               <span
-                className={`w-10 h-6 rounded-full transition-colors ${
-                  formData.detection_enabled ? 'bg-primary-500' : 'bg-gray-600'
-                }`}
+                className={`w-10 h-6 rounded-full transition-colors ${formData.detection_enabled ? 'bg-primary-500' : 'bg-gray-600'
+                  }`}
               >
                 <span
-                  className={`block w-4 h-4 mt-1 ml-1 rounded-full bg-white transition-transform ${
-                    formData.detection_enabled ? 'translate-x-4' : ''
-                  }`}
+                  className={`block w-4 h-4 mt-1 ml-1 rounded-full bg-white transition-transform ${formData.detection_enabled ? 'translate-x-4' : ''
+                    }`}
                 />
               </span>
               <span className="text-sm text-gray-300">Enable Detection</span>

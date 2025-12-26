@@ -214,7 +214,7 @@ function CameraHeatmapOverlay({
         <div ref={containerRef} className="relative w-full h-full overflow-hidden rounded-xl">
             {camera.status === 'online' ? (
                 <img
-                    src={`${cameraApi.getStreamUrl(camera.id)}?token=${token}`}
+                    src={`${cameraApi.getStreamUrl(camera.id)}&token=${token}`}
                     alt={camera.name}
                     className="w-full h-full object-cover"
                 />

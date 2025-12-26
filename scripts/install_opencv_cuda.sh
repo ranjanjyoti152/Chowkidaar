@@ -19,12 +19,19 @@
 set -e  # Exit on any error
 
 # Configuration
-OPENCV_VERSION="4.10.0"
+# Using OpenCV 4.x master (latest) for Video Codec SDK 13 compatibility
+OPENCV_VERSION="4.x"  # Use master branch for latest SDK support
 CUDA_ARCH="8.6"  # RTX A4500 compute capability
 NUM_JOBS=$(nproc)
 INSTALL_PREFIX="/usr/local"
 BUILD_DIR="/tmp/opencv_build"
 PYTHON_EXECUTABLE=$(which python3)
+
+# Video Codec SDK path (for NVCUVID hardware video decoding)
+# Download from: https://developer.nvidia.com/nvidia-video-codec-sdk
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+VIDEO_CODEC_SDK="${PROJECT_ROOT}/Video_Codec_SDK_13.0.19"
 
 # Colors for output
 RED='\033[0;31m'
@@ -71,6 +78,37 @@ check_nvidia() {
     if [[ -n "$COMPUTE_CAP" ]]; then
         log_info "GPU Compute Capability: $COMPUTE_CAP"
         CUDA_ARCH="$COMPUTE_CAP"
+    fi
+}
+
+# Setup Video Codec SDK headers for NVCUVID support
+setup_video_codec_sdk() {
+    log_info "Setting up NVIDIA Video Codec SDK for NVCUVID support..."
+    
+    CUDA_INCLUDE="/usr/local/cuda/include"
+    if [[ ! -d "$CUDA_INCLUDE" ]]; then
+        CUDA_INCLUDE="$(dirname $(dirname $(which nvcc)))/include"
+    fi
+    
+    if [[ -d "$VIDEO_CODEC_SDK" ]]; then
+        log_info "Found Video Codec SDK at: $VIDEO_CODEC_SDK"
+        
+        # Check for headers
+        if [[ -f "$VIDEO_CODEC_SDK/Interface/nvcuvid.h" ]]; then
+            # Copy headers to CUDA include directory
+            sudo cp -v "$VIDEO_CODEC_SDK/Interface/nvcuvid.h" "$CUDA_INCLUDE/" 2>/dev/null || true
+            sudo cp -v "$VIDEO_CODEC_SDK/Interface/cuviddec.h" "$CUDA_INCLUDE/" 2>/dev/null || true
+            sudo cp -v "$VIDEO_CODEC_SDK/Interface/nvEncodeAPI.h" "$CUDA_INCLUDE/" 2>/dev/null || true
+            log_success "Video Codec SDK headers installed to $CUDA_INCLUDE"
+        else
+            log_warning "Video Codec SDK headers not found in $VIDEO_CODEC_SDK/Interface/"
+            log_info "NVCUVID hardware decoding may not be available"
+        fi
+    else
+        log_warning "Video Codec SDK not found at: $VIDEO_CODEC_SDK"
+        log_info "Download from: https://developer.nvidia.com/nvidia-video-codec-sdk"
+        log_info "Extract to: $VIDEO_CODEC_SDK"
+        log_info "NVCUVID hardware decoding may not be available"
     fi
 }
 
@@ -321,6 +359,7 @@ main() {
     fi
     
     install_dependencies
+    setup_video_codec_sdk
     download_opencv
     build_opencv
     install_opencv

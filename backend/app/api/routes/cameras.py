@@ -389,27 +389,19 @@ async def stream_camera(
         detector = await get_detector()
     
     async def generate():
-        frame_count = 0
-        last_detections = []  # Keep last detections for smooth overlay
-        
         async for frame in handler.frame_generator():
             output_frame = frame
             
-            # Run detection every 5th frame to reduce CPU load
-            if detector and frame_count % 5 == 0:
+            # Run detection on every frame for precise bounding box tracking
+            if detector:
                 try:
                     detection_result = await detector.detect(frame)
                     detections = detection_result.get("objects", [])
                     if detections:
-                        last_detections = detections  # Update last detections
+                        output_frame = detector.draw_detections(frame, detections, use_track_colors=True)
                 except Exception as e:
                     pass  # Silently continue on detection errors
             
-            # Always draw last known detections
-            if detector and last_detections:
-                output_frame = detector.draw_detections(frame, last_detections)
-            
-            frame_count += 1
             _, buffer = cv2.imencode('.jpg', output_frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
             yield (
                 b'--frame\r\n'
