@@ -19,6 +19,7 @@ from app.services.stream_handler import get_stream_manager
 from app.services.vlm_service import get_unified_vlm_service
 from app.services.detection_service import get_detection_service
 from app.services.owlv2_detector import OWLv2Detector
+from app.services.embedding_service import get_embedding_service, initialize_embeddings_from_db
 from sqlalchemy import select
 
 
@@ -163,6 +164,19 @@ async def lifespan(app: FastAPI):
         logger.info("✅ Detection service started")
     except Exception as e:
         logger.error(f"❌ Detection service error: {e}")
+    
+    # Initialize embedding service for semantic search
+    logger.info("Initializing embedding service...")
+    try:
+        embedding_service = get_embedding_service()
+        if embedding_service.is_available():
+            async with AsyncSessionLocal() as db:
+                await initialize_embeddings_from_db(db)
+            logger.info(f"✅ Embedding service ready with {len(embedding_service.event_embeddings)} indexed events")
+        else:
+            logger.warning("⚠️ Embedding service not available (install: pip install sentence-transformers)")
+    except Exception as e:
+        logger.warning(f"⚠️ Embedding service skipped: {e}")
     
     logger.info(f"🛡️ {settings.app_name} is ready!")
     

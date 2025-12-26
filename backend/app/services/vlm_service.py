@@ -367,17 +367,22 @@ Do not use markdown formatting, bullet points, or asterisks."""
                     "messages": messages,
                     "max_tokens": 500,
                     "temperature": 0.7
-                }
+                },
+                timeout=60.0
             )
             
             if response.status_code == 200:
                 return response.json()["choices"][0]["message"]["content"].strip()
             else:
-                logger.error(f"OpenAI Chat API error: {response.status_code}")
-                return "I'm sorry, I encountered an error processing your request."
+                error_detail = response.text[:200] if response.text else "Unknown error"
+                logger.error(f"OpenAI Chat API error: {response.status_code} - {error_detail}")
+                return f"VLM Error: API returned status {response.status_code}. Please check your VLM settings."
+        except httpx.TimeoutException:
+            logger.error("OpenAI chat timeout")
+            return "VLM request timed out. Please try again."
         except Exception as e:
-            logger.error(f"OpenAI chat error: {e}")
-            return f"Error: {str(e)}"
+            logger.error(f"OpenAI chat error: {type(e).__name__}: {e}")
+            return f"VLM Error: {type(e).__name__} - {str(e) or 'Connection failed'}"
     
     def _build_system_prompt(self, context: Optional[str], has_images: bool) -> str:
         system_prompt = """You are Chowkidaar AI, an intelligent security assistant for a surveillance system.

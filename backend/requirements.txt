@@ -25,6 +25,10 @@ accelerate>=0.26.0
 huggingface_hub>=0.20.0
 tqdm>=4.66.0
 
+# Vector Embeddings (Semantic Search)
+sentence-transformers>=2.2.0
+faiss-cpu>=1.7.4  # For GPU: conda install -c pytorch faiss-gpu
+
 # Ollama Integration
 httpx>=0.26.0
 aiohttp>=3.9.3

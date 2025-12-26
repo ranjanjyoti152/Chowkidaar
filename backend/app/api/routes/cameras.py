@@ -21,6 +21,7 @@ from app.schemas.camera import (
 from app.api.deps import get_current_user, require_operator
 from app.services.yolo_detector import get_detector
 from app.services.stream_handler import get_stream_manager
+from app.services.embedding_service import get_embedding_service
 
 router = APIRouter(prefix="/cameras", tags=["Cameras"])
 
@@ -210,10 +211,14 @@ async def delete_camera(
     stream_manager = get_stream_manager()
     await stream_manager.remove_stream(camera_id)
     
+    # Remove embeddings for this camera's events
+    embedding_service = get_embedding_service()
+    removed_count = embedding_service.remove_camera_events(camera_id)
+    
     await db.delete(camera)
     await db.commit()
     
-    return {"message": "Camera deleted successfully"}
+    return {"message": f"Camera deleted successfully. Removed {removed_count} event embeddings."}
 
 
 @router.post("/{camera_id}/test", response_model=CameraTestResult)
