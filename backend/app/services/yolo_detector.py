@@ -41,6 +41,14 @@ class YOLODetector:
         "truck": EventSeverity.low,
     }
     
+    # Color palette for tracked objects (20 distinct colors)
+    TRACK_COLORS = [
+        (255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), (255, 0, 255),
+        (0, 255, 255), (255, 128, 0), (128, 0, 255), (0, 255, 128), (255, 0, 128),
+        (128, 255, 0), (0, 128, 255), (255, 128, 128), (128, 255, 128), (128, 128, 255),
+        (255, 200, 0), (200, 0, 255), (0, 200, 255), (255, 100, 100), (100, 255, 100)
+    ]
+    
     def __init__(self):
         self.model: Optional[YOLO] = None
         self.model_path = settings.yolo_model_path
@@ -55,6 +63,9 @@ class YOLODetector:
         }
         self._initialized = False
         self._current_model_name = None
+        # Per-camera tracker state for persistent tracking
+        self._camera_trackers: Dict[int, bool] = {}  # camera_id -> tracker initialized
+        self._default_tracker = "bytetrack.yaml"  # Default tracker config
     
     async def load_model(self, model_name: str, device: str = "cuda") -> bool:
         """Load a specific YOLO model by name"""
@@ -212,6 +223,123 @@ class YOLODetector:
             logger.error(f"Detection error: {e}")
             return {"objects": [], "metadata": {"error": str(e)}}
     
+    async def track(
+        self,
+        frame: np.ndarray,
+        camera_id: int = 0,
+        confidence_threshold: Optional[float] = None,
+        tracker: str = "bytetrack.yaml"
+    ) -> Dict[str, Any]:
+        """
+        Perform object detection with tracking on a frame.
+        Uses ByteTrack or BoT-SORT for persistent object IDs across frames.
+        
+        Args:
+            frame: Input image as numpy array
+            camera_id: Camera ID for per-camera tracker state
+            confidence_threshold: Optional confidence threshold override
+            tracker: Tracker config file (bytetrack.yaml or botsort.yaml)
+        
+        Returns:
+            Dictionary containing tracked objects with track_id and metadata
+        """
+        if not self._initialized or self.model is None:
+            logger.warning("YOLO model not initialized")
+            return {"objects": [], "metadata": {}}
+        
+        conf_threshold = confidence_threshold or self.confidence_threshold
+        start_time = datetime.utcnow()
+        
+        # Check if this is a new camera needing tracker initialization
+        is_new_camera = camera_id not in self._camera_trackers
+        if is_new_camera:
+            self._camera_trackers[camera_id] = True
+            logger.info(f"📍 Initialized tracker for camera {camera_id} using {tracker}")
+        
+        try:
+            # Run tracking inference in thread pool
+            # persist=True maintains tracking state across calls for same camera
+            loop = asyncio.get_event_loop()
+            results = await loop.run_in_executor(
+                None,
+                lambda: self.model.track(
+                    frame,
+                    conf=conf_threshold,
+                    device=self.device,
+                    tracker=tracker,
+                    persist=True,
+                    verbose=False
+                )
+            )
+            
+            # Calculate inference time
+            inference_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+            self._update_stats(inference_time)
+            
+            # Process results with track IDs
+            tracked_objects = []
+            for result in results:
+                boxes = result.boxes
+                if boxes is not None:
+                    for i, box in enumerate(boxes):
+                        class_id = int(box.cls[0])
+                        class_name = result.names[class_id]
+                        confidence = float(box.conf[0])
+                        bbox = box.xyxy[0].tolist()  # [x1, y1, x2, y2]
+                        
+                        # Get track ID if available
+                        track_id = None
+                        if box.id is not None:
+                            track_id = int(box.id[0])
+                        
+                        tracked_objects.append({
+                            "class_id": class_id,
+                            "class_name": class_name,
+                            "confidence": confidence,
+                            "bbox": bbox,
+                            "bbox_normalized": self._normalize_bbox(bbox, frame.shape),
+                            "track_id": track_id
+                        })
+            
+            return {
+                "objects": tracked_objects,
+                "metadata": {
+                    "inference_time_ms": inference_time,
+                    "frame_shape": frame.shape,
+                    "model": self.model_path,
+                    "confidence_threshold": conf_threshold,
+                    "tracker": tracker,
+                    "camera_id": camera_id,
+                    "tracking_enabled": True
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Tracking error: {e}")
+            return {"objects": [], "metadata": {"error": str(e)}}
+    
+    def reset_tracker(self, camera_id: Optional[int] = None):
+        """
+        Reset tracker state for a camera or all cameras.
+        Call this when a camera reconnects or stream restarts.
+        
+        Args:
+            camera_id: Specific camera to reset, or None for all cameras
+        """
+        if camera_id is not None:
+            if camera_id in self._camera_trackers:
+                del self._camera_trackers[camera_id]
+                logger.info(f"🔄 Reset tracker for camera {camera_id}")
+        else:
+            self._camera_trackers.clear()
+            logger.info("🔄 Reset all camera trackers")
+    
+    def _get_track_color(self, track_id: Optional[int]) -> Tuple[int, int, int]:
+        """Get a unique color for a track ID"""
+        if track_id is None:
+            return (0, 255, 255)  # Default yellow for untracked
+        return self.TRACK_COLORS[track_id % len(self.TRACK_COLORS)]
+    
     def _normalize_bbox(
         self,
         bbox: List[float],
@@ -294,27 +422,64 @@ class YOLODetector:
         self,
         frame: np.ndarray,
         detections: List[Dict[str, Any]],
-        color: Tuple[int, int, int] = (0, 255, 255)
+        color: Optional[Tuple[int, int, int]] = None,
+        use_track_colors: bool = True
     ) -> np.ndarray:
-        """Draw detection boxes on frame"""
+        """
+        Draw detection boxes on frame with optional track-based coloring.
+        
+        Args:
+            frame: Input frame to annotate
+            detections: List of detection dictionaries
+            color: Override color for all boxes (ignores track colors)
+            use_track_colors: If True and no color override, use unique colors per track_id
+        """
         annotated = frame.copy()
         
         for det in detections:
             bbox = det["bbox"]
             x1, y1, x2, y2 = map(int, bbox)
             
-            # Draw box
-            cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
+            # Determine box color
+            if color is not None:
+                box_color = color
+            elif use_track_colors and "track_id" in det:
+                box_color = self._get_track_color(det.get("track_id"))
+            else:
+                box_color = (0, 255, 255)  # Default yellow
             
-            # Draw label
-            label = f"{det['class_name']}: {det['confidence']:.2f}"
+            # Draw box with thicker border for better visibility
+            cv2.rectangle(annotated, (x1, y1), (x2, y2), box_color, 2)
+            
+            # Build label with track ID if available
+            track_id = det.get("track_id")
+            if track_id is not None:
+                label = f"{det['class_name']} #{track_id}: {det['confidence']:.2f}"
+            else:
+                label = f"{det['class_name']}: {det['confidence']:.2f}"
+            
+            # Calculate label background size for better readability
+            (label_w, label_h), baseline = cv2.getTextSize(
+                label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2
+            )
+            
+            # Draw label background
+            cv2.rectangle(
+                annotated,
+                (x1, y1 - label_h - 10),
+                (x1 + label_w + 4, y1),
+                box_color,
+                -1  # Filled
+            )
+            
+            # Draw label text (black text on colored background)
             cv2.putText(
                 annotated,
                 label,
-                (x1, y1 - 10),
+                (x1 + 2, y1 - 5),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.5,
-                color,
+                (0, 0, 0),  # Black text
                 2
             )
         

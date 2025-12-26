@@ -232,12 +232,16 @@ class DetectionService:
                 
                 # Run detection based on model type
                 if use_owlv2 and owlv2_detector:
-                    # OWLv2 open-vocabulary detection
+                    # OWLv2 open-vocabulary detection (no tracking)
                     detection_result = await owlv2_detector.detect(frame)
                     active_detector = owlv2_detector
                 else:
-                    # YOLO detection
-                    detection_result = await yolo_detector.detect(frame)
+                    # YOLO detection with object tracking (ByteTrack)
+                    detection_result = await yolo_detector.track(
+                        frame, 
+                        camera_id=camera_id,
+                        confidence_threshold=confidence
+                    )
                     active_detector = yolo_detector
                 
                 detections = detection_result.get("objects", [])

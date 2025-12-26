@@ -12,6 +12,7 @@ import {
   ArrowRightOnRectangleIcon,
   Bars3Icon,
   XMarkIcon,
+  ChartBarSquareIcon,
 } from '@heroicons/react/24/outline'
 import { useAuthStore } from '../store/authStore'
 import clsx from 'clsx'
@@ -21,6 +22,7 @@ const navigation = [
   { name: 'Cameras', href: '/cameras', icon: VideoCameraIcon },
   { name: 'Events', href: '/events', icon: BellAlertIcon },
   { name: 'Monitor', href: '/monitor', icon: CpuChipIcon },
+  { name: 'Heatmap', href: '/heatmap', icon: ChartBarSquareIcon },
   { name: 'Assistant', href: '/assistant', icon: ChatBubbleLeftRightIcon },
   { name: 'Settings', href: '/settings', icon: Cog6ToothIcon },
   { name: 'Admin', href: '/admin', icon: UserGroupIcon },
@@ -29,13 +31,13 @@ const navigation = [
 // Animation variants
 const sidebarVariants = {
   hidden: { x: -280, opacity: 0 },
-  visible: { 
-    x: 0, 
+  visible: {
+    x: 0,
     opacity: 1,
     transition: { type: 'spring', damping: 25, stiffness: 300 }
   },
-  exit: { 
-    x: -280, 
+  exit: {
+    x: -280,
     opacity: 0,
     transition: { duration: 0.2 }
   }
@@ -93,7 +95,7 @@ export default function Layout() {
         <div className="flex h-full flex-col glass-card rounded-none lg:rounded-r-2xl border-r border-white/10">
           {/* Logo */}
           <div className="flex items-center gap-3 px-6 py-5 border-b border-white/10">
-            <motion.div 
+            <motion.div
               whileHover={{ scale: 1.05, rotate: 5 }}
               whileTap={{ scale: 0.95 }}
               className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center shadow-lg shadow-primary-500/40"
@@ -133,12 +135,12 @@ export default function Layout() {
                         transition={{ type: 'spring', damping: 25, stiffness: 300 }}
                       />
                     )}
-                    
+
                     {/* Hover background */}
                     {!isActive && (
                       <div className="absolute inset-0 rounded-xl bg-white/0 group-hover:bg-white/8 transition-colors duration-200" />
                     )}
-                    
+
                     {/* Icon */}
                     <motion.div
                       whileHover={{ scale: 1.1 }}
@@ -150,7 +152,7 @@ export default function Layout() {
                         isActive ? 'text-primary-400' : 'group-hover:text-primary-400'
                       )} />
                     </motion.div>
-                    
+
                     {/* Label */}
                     <span className="relative z-10">{item.name}</span>
                   </>
@@ -162,7 +164,7 @@ export default function Layout() {
           {/* User section */}
           <div className="px-3 py-4 border-t border-white/10">
             <div className="flex items-center gap-3 px-3 py-3 rounded-xl bg-white/5">
-              <motion.div 
+              <motion.div
                 whileHover={{ scale: 1.1 }}
                 className="w-10 h-10 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center shadow-lg shadow-primary-500/30"
               >
@@ -203,10 +205,10 @@ export default function Layout() {
             >
               <Bars3Icon className="w-6 h-6" />
             </motion.button>
-            
+
             <div className="flex items-center gap-4">
               {/* Status indicator */}
-              <motion.div 
+              <motion.div
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
                 className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-green-500/15 border border-green-500/30"

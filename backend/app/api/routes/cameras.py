@@ -97,6 +97,10 @@ async def create_camera(
         )
         camera.status = handler.get_status()
         camera.last_seen = datetime.utcnow()
+        # Auto-save detected resolution
+        if handler.info.resolution:
+            camera.resolution_width = handler.info.resolution[0]
+            camera.resolution_height = handler.info.resolution[1]
         await db.commit()
         await db.refresh(camera)
     except Exception as e:
@@ -288,9 +292,12 @@ async def start_camera_stream(
         fps=camera.fps
     )
     
-    # Update status
+    # Update status and auto-save detected resolution
     camera.status = handler.get_status()
     camera.last_seen = datetime.utcnow()
+    if handler.info.resolution:
+        camera.resolution_width = handler.info.resolution[0]
+        camera.resolution_height = handler.info.resolution[1]
     await db.commit()
     
     return {
@@ -359,9 +366,12 @@ async def stream_camera(
             stream_url=camera.stream_url,
             fps=camera.fps
         )
-        # Update camera status
+        # Update camera status and resolution
         camera.status = handler.get_status()
         camera.last_seen = datetime.utcnow()
+        if handler.info.resolution:
+            camera.resolution_width = handler.info.resolution[0]
+            camera.resolution_height = handler.info.resolution[1]
         await db.commit()
         
         # Wait a bit for connection

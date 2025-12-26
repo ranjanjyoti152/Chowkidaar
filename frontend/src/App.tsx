@@ -9,14 +9,15 @@ import Monitor from './pages/Monitor'
 import Assistant from './pages/Assistant'
 import Settings from './pages/Settings'
 import Admin from './pages/Admin'
+import Heatmap from './pages/Heatmap'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuthStore()
-  
+
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />
   }
-  
+
   return <>{children}</>
 }
 
@@ -36,6 +37,7 @@ function App() {
         <Route path="cameras" element={<Cameras />} />
         <Route path="events" element={<Events />} />
         <Route path="monitor" element={<Monitor />} />
+        <Route path="heatmap" element={<Heatmap />} />
         <Route path="assistant" element={<Assistant />} />
         <Route path="settings" element={<Settings />} />
         <Route path="admin" element={<Admin />} />

@@ -313,6 +313,227 @@ async def get_event_stats(
     )
 
 
+class HeatmapDataPoint(BaseModel):
+    """Single data point in the heatmap"""
+    hour: int  # 0-23
+    day: str   # Date string YYYY-MM-DD
+    day_name: str  # Mon, Tue, etc.
+    count: int
+    class_name: str
+
+
+class HeatmapResponse(BaseModel):
+    """Heatmap data response"""
+    data: List[HeatmapDataPoint]
+    available_classes: List[str]
+    date_range: dict
+
+
+class SpatialHeatPoint(BaseModel):
+    """A single point for spatial heatmap - normalized coordinates (0-1)"""
+    x: float  # Normalized x center (0-1)
+    y: float  # Normalized y center (0-1)
+    class_name: str
+    weight: float = 1.0  # Weight/intensity
+
+
+class SpatialHeatmapResponse(BaseModel):
+    """Spatial heatmap data per camera"""
+    camera_id: int
+    points: List[SpatialHeatPoint]
+    total_detections: int
+    class_counts: dict
+    frame_width: int = 1920
+    frame_height: int = 1080
+
+
+@router.get("/heatmap/spatial")
+async def get_spatial_heatmap_data(
+    camera_id: int = Query(..., description="Camera ID to get spatial heatmap for"),
+    classes: Optional[str] = Query(None, description="Comma-separated class names to filter"),
+    days: int = Query(7, ge=1, le=30, description="Number of days to include"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get spatial heatmap data with normalized bbox positions for a specific camera"""
+    
+    now = datetime.now()
+    start_date = now - timedelta(days=days)
+    
+    # Parse classes filter
+    class_filter = None
+    if classes:
+        class_filter = [c.strip().lower() for c in classes.split(",")]
+    
+    # Get camera resolution for proper normalization
+    camera_result = await db.execute(
+        select(Camera).where(Camera.id == camera_id).where(Camera.owner_id == current_user.id)
+    )
+    camera = camera_result.scalar_one_or_none()
+    
+    # Default to HD resolution if not set
+    frame_width = camera.resolution_width if camera and camera.resolution_width else 1920
+    frame_height = camera.resolution_height if camera and camera.resolution_height else 1080
+    
+    # Query events for this camera
+    query = (
+        select(Event)
+        .where(Event.user_id == current_user.id)
+        .where(Event.camera_id == camera_id)
+        .where(Event.timestamp >= start_date)
+        .where(Event.detected_objects.isnot(None))
+    )
+    
+    result = await db.execute(query)
+    events = result.scalars().all()
+    
+    # Extract bbox center points
+    points = []
+    class_counts = {}
+    
+    for event in events:
+        detected_objects = event.detected_objects or []
+        if isinstance(detected_objects, list):
+            for obj in detected_objects:
+                if isinstance(obj, dict):
+                    class_name = obj.get("class", obj.get("class_name", "unknown")).lower()
+                    
+                    # Apply class filter
+                    if class_filter and class_name not in class_filter:
+                        continue
+                    
+                    # Get bounding box - try different formats
+                    bbox = obj.get("bbox", obj.get("box", None))
+                    if bbox and isinstance(bbox, (list, tuple)) and len(bbox) >= 4:
+                        # bbox is [x1, y1, x2, y2] in pixel coords
+                        x1, y1, x2, y2 = float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])
+                        
+                        # Calculate center point
+                        cx = (x1 + x2) / 2
+                        cy = (y1 + y2) / 2
+                        
+                        # Normalize using actual camera resolution
+                        # If values are already < 1, they're already normalized
+                        if cx > 1 or cy > 1:
+                            cx = cx / frame_width
+                            cy = cy / frame_height
+                        
+                        # Clamp to 0-1 range
+                        cx = max(0.0, min(1.0, cx))
+                        cy = max(0.0, min(1.0, cy))
+                        
+                        points.append(SpatialHeatPoint(
+                            x=cx,
+                            y=cy,
+                            class_name=class_name,
+                            weight=float(obj.get("confidence", 1.0))
+                        ))
+                        
+                        class_counts[class_name] = class_counts.get(class_name, 0) + 1
+    
+    return SpatialHeatmapResponse(
+        camera_id=camera_id,
+        points=points,
+        total_detections=len(points),
+        class_counts=class_counts,
+        frame_width=frame_width,
+        frame_height=frame_height
+    )
+
+
+
+@router.get("/heatmap", response_model=HeatmapResponse)
+async def get_heatmap_data(
+    camera_id: Optional[int] = None,
+    classes: Optional[str] = Query(None, description="Comma-separated class names to filter"),
+    days: int = Query(7, ge=1, le=30, description="Number of days to include"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get heatmap data showing detection activity by hour and day, grouped by class"""
+    
+    # Calculate date range
+    now = datetime.now()
+    start_date = now - timedelta(days=days)
+    
+    # Parse classes filter
+    class_filter = None
+    if classes:
+        class_filter = [c.strip().lower() for c in classes.split(",")]
+    
+    # Query events with detected objects
+    query = (
+        select(Event)
+        .where(Event.user_id == current_user.id)
+        .where(Event.timestamp >= start_date)
+        .where(Event.detected_objects.isnot(None))
+    )
+    
+    if camera_id:
+        query = query.where(Event.camera_id == camera_id)
+    
+    result = await db.execute(query)
+    events = result.scalars().all()
+    
+    # Process events into heatmap data
+    heatmap_data = []
+    all_classes = set()
+    
+    for event in events:
+        event_hour = event.timestamp.hour
+        event_day = event.timestamp.strftime("%Y-%m-%d")
+        event_day_name = event.timestamp.strftime("%a")
+        
+        # Extract class names from detected_objects
+        detected_objects = event.detected_objects or []
+        if isinstance(detected_objects, list):
+            for obj in detected_objects:
+                if isinstance(obj, dict):
+                    class_name = obj.get("class", obj.get("class_name", "unknown")).lower()
+                    all_classes.add(class_name)
+                    
+                    # Apply class filter if specified
+                    if class_filter and class_name not in class_filter:
+                        continue
+                    
+                    heatmap_data.append({
+                        "hour": event_hour,
+                        "day": event_day,
+                        "day_name": event_day_name,
+                        "class_name": class_name
+                    })
+    
+    # Aggregate counts
+    from collections import Counter
+    aggregated = Counter()
+    for point in heatmap_data:
+        key = (point["hour"], point["day"], point["day_name"], point["class_name"])
+        aggregated[key] += 1
+    
+    # Convert to response format
+    result_data = [
+        HeatmapDataPoint(
+            hour=key[0],
+            day=key[1],
+            day_name=key[2],
+            class_name=key[3],
+            count=count
+        )
+        for key, count in aggregated.items()
+    ]
+    
+    return HeatmapResponse(
+        data=result_data,
+        available_classes=sorted(list(all_classes)),
+        date_range={
+            "start": start_date.strftime("%Y-%m-%d"),
+            "end": now.strftime("%Y-%m-%d"),
+            "days": days
+        }
+    )
+
+
+
 @router.get("/{event_id}", response_model=EventWithCamera)
 async def get_event(
     event_id: int,

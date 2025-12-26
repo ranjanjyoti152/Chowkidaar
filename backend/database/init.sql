@@ -163,8 +163,8 @@ CREATE TABLE IF NOT EXISTS cameras (
     detection_enabled BOOLEAN DEFAULT true,
     recording_enabled BOOLEAN DEFAULT false,
     fps INTEGER DEFAULT 15,
-    resolution_width INTEGER,
-    resolution_height INTEGER,
+    resolution_width INTEGER DEFAULT 640,   -- Default to common RTSP resolution
+    resolution_height INTEGER DEFAULT 480,  -- Used for heatmap normalization
     location VARCHAR(255),
     
     -- Context-aware detection settings (helps AI decide severity)
@@ -212,6 +212,13 @@ CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
 CREATE INDEX IF NOT EXISTS idx_events_severity ON events(severity);
 CREATE INDEX IF NOT EXISTS idx_events_acknowledged ON events(is_acknowledged);
+
+-- GIN index for efficient JSONB queries on detected_objects
+-- Used by heatmap API to query by class name
+CREATE INDEX IF NOT EXISTS idx_events_detected_objects ON events USING GIN (detected_objects);
+
+-- Note: detected_objects JSONB stores tracking data like:
+-- [{"class": "person", "class_name": "person", "confidence": 0.85, "bbox": [...], "track_id": 1}, ...]
 
 -- ===========================================
 -- CHAT SESSIONS TABLE
