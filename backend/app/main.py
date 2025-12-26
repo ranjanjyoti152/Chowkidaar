@@ -86,13 +86,30 @@ async def lifespan(app: FastAPI):
     logger.info("Loading VLM settings from database...")
     try:
         from app.models.settings import UserSettings
+        from app.models.user import User
         async with AsyncSessionLocal() as db:
-            # Get first user's settings (or admin settings)
-            result = await db.execute(select(UserSettings).limit(1))
-            user_settings = result.scalar_one_or_none()
+            # First try to get admin user's settings (most authoritative)
+            admin_result = await db.execute(
+                select(UserSettings)
+                .join(User, UserSettings.user_id == User.id)
+                .where(User.role == 'admin')
+                .order_by(UserSettings.updated_at.desc())
+                .limit(1)
+            )
+            user_settings = admin_result.scalar_one_or_none()
+            
+            # Fall back to any user settings if no admin settings exist
+            if not user_settings:
+                result = await db.execute(
+                    select(UserSettings)
+                    .order_by(UserSettings.updated_at.desc())
+                    .limit(1)
+                )
+                user_settings = result.scalar_one_or_none()
             
             if user_settings:
                 provider = getattr(user_settings, 'vlm_provider', 'ollama')
+                logger.info(f"Found saved VLM settings: provider={provider}, model={user_settings.vlm_model}, url={user_settings.vlm_url}")
                 unified_vlm_service.configure(
                     provider=provider,
                     ollama_url=user_settings.vlm_url,
@@ -103,9 +120,9 @@ async def lifespan(app: FastAPI):
                     gemini_api_key=getattr(user_settings, 'gemini_api_key', None),
                     gemini_model=getattr(user_settings, 'gemini_model', 'gemini-2.0-flash-exp')
                 )
-                logger.info(f"✅ VLM service configured: provider={provider}")
+                logger.info(f"✅ VLM service configured from saved settings: provider={provider}")
             else:
-                logger.info("No VLM settings found, using defaults (Ollama)")
+                logger.warning("⚠️ No VLM settings found in database, using defaults (Ollama)")
     except Exception as e:
         logger.error(f"❌ Error loading VLM settings: {e}")
     

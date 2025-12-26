@@ -1,5 +1,6 @@
 """
 Chowkidaar NVR - RTSP Stream Handler Service
+With CUDA hardware acceleration support
 """
 import asyncio
 from typing import Dict, Any, Optional, Callable, AsyncGenerator
@@ -14,6 +15,24 @@ from enum import Enum
 
 from app.core.config import settings
 from app.models.camera import CameraStatus
+
+
+# Check CUDA availability at module load
+def _check_cuda_available() -> bool:
+    """Check if CUDA is available for video processing"""
+    try:
+        if hasattr(cv2, 'cuda'):
+            device_count = cv2.cuda.getCudaEnabledDeviceCount()
+            if device_count > 0:
+                logger.info(f"🚀 CUDA enabled: {device_count} GPU(s) available for video processing")
+                return True
+        logger.info("💻 CUDA not available, using CPU for video processing")
+        return False
+    except Exception as e:
+        logger.warning(f"CUDA check failed: {e}, using CPU")
+        return False
+
+CUDA_AVAILABLE = _check_cuda_available()
 
 
 class StreamState(Enum):
@@ -38,13 +57,17 @@ class StreamInfo:
 
 
 class RTSPStreamHandler:
-    """Handles RTSP camera stream processing"""
+    """Handles RTSP camera stream processing with optional CUDA acceleration"""
     
-    def __init__(self, camera_id: int, stream_url: str, fps: int = 15):
+    def __init__(self, camera_id: int, stream_url: str, fps: int = 15, use_cuda: bool = True):
         self.camera_id = camera_id
         self.stream_url = stream_url
         self.target_fps = fps
         self.buffer_size = settings.stream_buffer_size
+        
+        # CUDA settings - use if available and requested
+        self.use_cuda = use_cuda and CUDA_AVAILABLE
+        self._cuda_reader = None  # cv2.cudacodec.VideoReader when using CUDA
         
         self._cap: Optional[cv2.VideoCapture] = None
         self._frame_queue: Queue = Queue(maxsize=self.buffer_size)
@@ -65,9 +88,12 @@ class RTSPStreamHandler:
         self._callbacks.append(callback)
     
     def _capture_loop(self):
-        """Internal capture loop running in a separate thread"""
+        """Internal capture loop running in a separate thread.
+        Uses CUDA hardware decoding when available, falls back to CPU otherwise.
+        """
         reconnect_delay = settings.stream_reconnect_delay
         frame_interval = 1.0 / self.target_fps
+        using_cuda = False
         
         while self._running:
             try:
@@ -75,33 +101,77 @@ class RTSPStreamHandler:
                 self._state = StreamState.CONNECTING
                 self.info.state = StreamState.CONNECTING
                 
-                logger.info(f"Camera {self.camera_id}: Connecting to {self.stream_url}")
+                # Try CUDA hardware decoding first
+                if self.use_cuda and hasattr(cv2, 'cudacodec'):
+                    try:
+                        logger.info(f"Camera {self.camera_id}: Connecting with CUDA acceleration to {self.stream_url}")
+                        self._cuda_reader = cv2.cudacodec.createVideoReader(self.stream_url)
+                        using_cuda = True
+                        logger.info(f"Camera {self.camera_id}: ✅ CUDA hardware decoding enabled")
+                    except Exception as cuda_err:
+                        logger.warning(f"Camera {self.camera_id}: CUDA failed ({cuda_err}), falling back to CPU")
+                        self._cuda_reader = None
+                        using_cuda = False
                 
-                self._cap = cv2.VideoCapture(self.stream_url)
-                self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                
-                if not self._cap.isOpened():
-                    raise ConnectionError("Failed to open stream")
+                # Fall back to CPU VideoCapture
+                if not using_cuda:
+                    logger.info(f"Camera {self.camera_id}: Connecting with CPU to {self.stream_url}")
+                    self._cap = cv2.VideoCapture(self.stream_url)
+                    self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                    
+                    if not self._cap.isOpened():
+                        raise ConnectionError("Failed to open stream")
                 
                 # Get stream info
-                width = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                height = int(self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                self.info.resolution = (width, height)
+                if using_cuda and self._cuda_reader:
+                    # CUDA reader - get format info
+                    try:
+                        format_info = self._cuda_reader.format()
+                        width = format_info.width
+                        height = format_info.height
+                    except:
+                        # Default if format not available
+                        width, height = 1920, 1080
+                else:
+                    width = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                    height = int(self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
                 
+                self.info.resolution = (width, height)
                 self._state = StreamState.CONNECTED
                 self.info.state = StreamState.CONNECTED
                 self.info.error_message = None
                 
-                logger.info(f"Camera {self.camera_id}: Connected ({width}x{height})")
+                accel_mode = "🚀 CUDA" if using_cuda else "💻 CPU"
+                logger.info(f"Camera {self.camera_id}: Connected ({width}x{height}) [{accel_mode}]")
                 
                 last_frame_time = datetime.utcnow()
                 
-                while self._running and self._cap.isOpened():
-                    ret, frame = self._cap.read()
+                while self._running:
+                    frame = None
                     
-                    if not ret:
-                        logger.warning(f"Camera {self.camera_id}: Failed to read frame")
-                        break
+                    # Read frame based on mode
+                    if using_cuda and self._cuda_reader:
+                        try:
+                            ret, gpu_frame = self._cuda_reader.nextFrame()
+                            if ret:
+                                # Download GPU frame to CPU for processing
+                                frame = gpu_frame.download()
+                            else:
+                                logger.warning(f"Camera {self.camera_id}: CUDA reader failed to read frame")
+                                break
+                        except Exception as e:
+                            logger.error(f"Camera {self.camera_id}: CUDA read error: {e}")
+                            break
+                    else:
+                        if not self._cap or not self._cap.isOpened():
+                            break
+                        ret, frame = self._cap.read()
+                        if not ret:
+                            logger.warning(f"Camera {self.camera_id}: Failed to read frame")
+                            break
+                    
+                    if frame is None:
+                        continue
                     
                     # Rate limiting
                     now = datetime.utcnow()
@@ -135,9 +205,13 @@ class RTSPStreamHandler:
                 self.info.error_message = str(e)
             
             finally:
+                # Cleanup
+                if self._cuda_reader:
+                    self._cuda_reader = None
                 if self._cap:
                     self._cap.release()
                     self._cap = None
+                using_cuda = False
             
             # Reconnect if still running
             if self._running:
