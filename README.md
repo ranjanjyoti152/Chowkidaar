@@ -140,7 +140,92 @@ chowkidaar/
 | VLM | Ollama (LLaVA, etc.) |
 | Frontend | React, TailwindCSS |
 | Database | PostgreSQL |
-| Streaming | OpenCV, FFmpeg |
+| Streaming | OpenCV (CUDA), FFmpeg |
+
+## 🎮 GPU Acceleration (CUDA)
+
+Chowkidaar supports **GPU-accelerated video streaming** using NVIDIA CUDA for maximum performance with multiple camera streams.
+
+### Features
+- 🚀 **CUDA Hardware Video Decoding** - NVCUVID for H.264/H.265 streams
+- 🎯 **GPU-Accelerated YOLO Inference** - Faster object detection
+- 🔥 **Multi-GPU Support** - Tested with 2x NVIDIA RTX A4500
+
+### Prerequisites
+- NVIDIA GPU with Compute Capability 6.0+ (RTX/GTX 10xx or newer)
+- NVIDIA Driver 550+ 
+- CUDA Toolkit 12.x
+- cuDNN 9.x
+
+### Building OpenCV with CUDA Support
+
+Chowkidaar includes a script to compile OpenCV from source with full CUDA support:
+
+```bash
+# Navigate to scripts directory
+cd scripts
+
+# Run the installation script
+./install_opencv_cuda.sh
+```
+
+The script will:
+1. ✅ Detect your GPU architecture automatically
+2. ✅ Install all required dependencies
+3. ✅ Setup NVIDIA Video Codec SDK headers
+4. ✅ Compile OpenCV 4.x with CUDA, cuDNN, NVCUVID, and NVCUVENC
+5. ✅ Verify the installation
+
+### NVIDIA Video Codec SDK
+
+The project includes **Video Codec SDK 13.0.19** for hardware video encoding/decoding:
+
+```
+Video_Codec_SDK_13.0.19/
+├── Interface/          # Header files (nvcuvid.h, cuviddec.h, nvEncodeAPI.h)
+├── Samples/            # Sample applications
+└── Lib/                # Libraries (Windows only, Linux uses driver libs)
+```
+
+Headers are automatically copied to CUDA include directory by the install script.
+
+### Verify CUDA Installation
+
+```python
+import cv2
+
+# Check OpenCV version
+print(f"OpenCV Version: {cv2.__version__}")
+
+# Check CUDA devices
+devices = cv2.cuda.getCudaEnabledDeviceCount()
+print(f"CUDA Enabled Devices: {devices}")
+
+# Check Video Codec support
+has_cudacodec = hasattr(cv2, 'cudacodec')
+print(f"CUDA Video Codec: {has_cudacodec}")
+
+# Print CUDA build info
+info = cv2.getBuildInformation()
+for line in info.split('\n'):
+    if 'CUDA' in line or 'cuDNN' in line:
+        print(line)
+```
+
+Expected output with CUDA enabled:
+```
+OpenCV Version: 4.13.0-pre
+CUDA Enabled Devices: 2
+CUDA Video Codec: True
+NVIDIA CUDA: YES (ver 12.4, CUFFT CUBLAS NVCUVID NVCUVENC FAST_MATH)
+cuDNN: YES (ver 9.0.0)
+```
+
+### CPU Fallback
+
+If CUDA is not available, Chowkidaar automatically falls back to CPU video decoding. You'll see in logs:
+- `[🚀 CUDA]` - Using GPU hardware decoding
+- `[💻 CPU]` - Using CPU software decoding
 
 ## 🚦 Getting Started
 
