@@ -1,6 +1,19 @@
 # 🛡️ Chowkidaar - Intelligent NVR System
 
-**Chowkidaar** (meaning "Watchman" in Hindi) is an AI-powered Network Video Recorder application that provides intelligent surveillance with real-time object detection, event summarization, and an AI assistant for querying events.
+<div align="center">
+
+![FastAPI](https://img.shields.io/badge/FastAPI-005571?style=for-the-badge&logo=fastapi)
+![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)
+![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-316192?style=for-the-badge&logo=postgresql&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)
+![YOLOv8](https://img.shields.io/badge/YOLOv8-Computer%20Vision-blue?style=for-the-badge)
+![Ollama](https://img.shields.io/badge/Ollama-Local%20LLM-black?style=for-the-badge)
+
+</div>
+
+**Chowkidaar** (meaning "Watchman" in Hindi) is an **advanced AI-powered Network Video Recorder** application that provides intelligent surveillance with real-time object detection, event summarization, and an AI assistant for querying events.
 
 ## 🏗️ System Architecture
 
@@ -35,6 +48,12 @@
 ```
 
 ## 🚀 Features
+
+### 🔥 Advanced Analytics (New)
+- **Spatial Heatmaps**: Real-time **canvas-based heat overlays** showing high-activity zones on camera feeds.
+- **Persistent Object Tracking**: Integrated **ByteTrack** for robust object ID tracking across frames.
+- **Dynamic Class Filtering**: Filter heatmap data by specific object classes (person, car, etc.) fetched directly from the active model.
+- **Auto-Resolution Sync**: Backend automatically detects and adapts to camera stream resolution for precise data mapping.
 
 ### Core Features
 - **Real-time RTSP Stream Processing** - Connect unlimited IP cameras
