@@ -28,36 +28,6 @@ const navigation = [
   { name: 'Admin', href: '/admin', icon: UserGroupIcon },
 ]
 
-// Animation variants
-const sidebarVariants = {
-  hidden: { x: -280, opacity: 0 },
-  visible: {
-    x: 0,
-    opacity: 1,
-    transition: { type: 'spring', damping: 25, stiffness: 300 }
-  },
-  exit: {
-    x: -280,
-    opacity: 0,
-    transition: { duration: 0.2 }
-  }
-}
-
-const navItemVariants = {
-  hidden: { opacity: 0, x: -20 },
-  visible: (i: number) => ({
-    opacity: 1,
-    x: 0,
-    transition: { delay: i * 0.05, duration: 0.2 }
-  })
-}
-
-const pageTransition = {
-  initial: { opacity: 0, y: 10 },
-  animate: { opacity: 1, y: 0 },
-  exit: { opacity: 0, y: -10 },
-  transition: { duration: 0.2 }
-}
 
 export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -110,7 +80,7 @@ export default function Layout() {
 
           {/* Navigation */}
           <nav className="flex-1 px-3 py-6 space-y-1 overflow-y-auto scrollbar-hide">
-            {navigation.map((item, i) => (
+            {navigation.map((item) => (
               <NavLink
                 key={item.name}
                 to={item.href}
