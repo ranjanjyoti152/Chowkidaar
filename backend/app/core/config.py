@@ -73,6 +73,9 @@ class Settings(BaseSettings):
     # Redis
     redis_url: Optional[str] = None
     
+    # HuggingFace (for downloading models like CLIP, SAM, etc.)
+    hf_token: Optional[str] = None
+    
     @property
     def cors_origins_list(self) -> List[str]:
         if self.cors_origins.strip() == "*":

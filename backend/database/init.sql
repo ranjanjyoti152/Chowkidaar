@@ -3,6 +3,7 @@
 
 -- Enable extensions
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "vector";  -- pgvector for semantic search embeddings
 
 -- User roles enum
 DO $$ BEGIN
@@ -195,6 +196,11 @@ CREATE TABLE IF NOT EXISTS events (
     detection_metadata JSONB DEFAULT '{}',
     summary TEXT,
     summary_generated_at TIMESTAMP,
+    
+    -- Vector Embeddings (pgvector) for semantic search
+    text_embedding vector(384),     -- all-MiniLM-L6-v2 text embedding
+    image_embedding vector(512),    -- CLIP ViT-B/32 image embedding
+    
     timestamp TIMESTAMP DEFAULT NOW() NOT NULL,
     duration_seconds FLOAT,
     is_acknowledged BOOLEAN DEFAULT false,
@@ -216,6 +222,16 @@ CREATE INDEX IF NOT EXISTS idx_events_acknowledged ON events(is_acknowledged);
 -- GIN index for efficient JSONB queries on detected_objects
 -- Used by heatmap API to query by class name
 CREATE INDEX IF NOT EXISTS idx_events_detected_objects ON events USING GIN (detected_objects);
+
+-- HNSW indexes for fast vector similarity search (pgvector)
+-- Used for semantic event search and visual similarity matching
+CREATE INDEX IF NOT EXISTS idx_events_text_embedding 
+    ON events USING hnsw (text_embedding vector_cosine_ops)
+    WITH (m = 16, ef_construction = 64);
+
+CREATE INDEX IF NOT EXISTS idx_events_image_embedding 
+    ON events USING hnsw (image_embedding vector_cosine_ops)
+    WITH (m = 16, ef_construction = 64);
 
 -- Note: detected_objects JSONB stores tracking data like:
 -- [{"class": "person", "class_name": "person", "confidence": 0.85, "bbox": [...], "track_id": 1}, ...]

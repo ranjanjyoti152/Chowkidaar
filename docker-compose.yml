@@ -1,8 +1,8 @@
 # Chowkidaar NVR - Docker Compose Configuration
 services:
-  # PostgreSQL Database
+  # PostgreSQL Database with pgvector extension for semantic search
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16  # PostgreSQL 16 with pgvector pre-installed
     container_name: chowkidaar-db
     restart: unless-stopped
     environment:
@@ -36,7 +36,7 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-chowkidaar}:${POSTGRES_PASSWORD:-chowkidaar_secret}@postgres:5432/${POSTGRES_DB:-chowkidaar}
       - SECRET_KEY=${SECRET_KEY:-change-this-in-production-please}
-      - OLLAMA_BASE_URL=http://192.168.101.66:11434
+      - OLLAMA_BASE_URL=http://192.168.100.66:11434
       - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma3:4b}
       - YOLO_MODEL=${YOLO_MODEL:-yolov8n.pt}
       - YOLO_DEVICE=${YOLO_DEVICE:-0}
@@ -44,7 +44,7 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
       - ./data/recordings:/data/recordings
-      - ./data/snapshots:/data/snapshots
+      - ./data/snapshots:/data/snapshotsß
       - ./data/models:/data/models
     ports:
       - "8001:8000"

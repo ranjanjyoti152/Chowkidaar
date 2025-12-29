@@ -28,6 +28,9 @@ tqdm>=4.66.0
 # Vector Embeddings (Semantic Search)
 sentence-transformers>=2.2.0
 faiss-cpu>=1.7.4  # For GPU: conda install -c pytorch faiss-gpu
+imagehash>=4.3.0  # Perceptual hashing for VLM response caching
+pgvector>=0.2.0   # PostgreSQL vector extension for persistent embedding storage
+scikit-learn>=1.3.0  # Isolation Forest for anomaly detection
 
 # Ollama Integration
 httpx>=0.26.0

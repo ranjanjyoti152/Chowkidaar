@@ -297,6 +297,28 @@ export const systemApi = {
     return response.data
   },
 
+  pullOllamaModel: async (modelName: string, url?: string): Promise<{ status: string; message: string; model: string; models?: string[] }> => {
+    const response = await api.post('/system/ollama/pull', null, {
+      params: { model_name: modelName, ...(url ? { url } : {}) },
+      timeout: 600000  // 10 minute timeout for large model downloads
+    })
+    return response.data
+  },
+
+  // Get URL for streaming model pull with SSE progress updates
+  getOllamaPullStreamUrl: (modelName: string, url?: string): string => {
+    const params = new URLSearchParams({ model_name: modelName })
+    if (url) params.append('url', url)
+    return `${api.defaults.baseURL}/system/ollama/pull-stream?${params.toString()}`
+  },
+
+  deleteOllamaModel: async (modelName: string, url?: string): Promise<{ status: string; message: string }> => {
+    const response = await api.delete(`/system/ollama/model/${encodeURIComponent(modelName)}`, {
+      params: url ? { url } : {}
+    })
+    return response.data
+  },
+
   testLLMProvider: async (params: { provider: string; url?: string; api_key?: string; model?: string }): Promise<{ status: string; provider: string; models: string[]; model_count?: number; error?: string }> => {
     const response = await api.post('/system/llm/test', null, { params })
     return response.data

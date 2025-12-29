@@ -137,6 +137,11 @@ export default function Settings() {
   const [geminiStatus, setGeminiStatus] = useState<'checking' | 'online' | 'offline' | 'idle'>('idle')
   const [isTestingProvider, setIsTestingProvider] = useState(false)
 
+  // Ollama model download state
+  const [newOllamaModel, setNewOllamaModel] = useState('')
+  const [isPullingModel, setIsPullingModel] = useState(false)
+  const [pullProgress, setPullProgress] = useState<{ percent: number; status: string }>({ percent: 0, status: '' })
+
   // Available models for each provider
   const openaiModelOptions = [
     'gpt-4o',
@@ -367,6 +372,107 @@ export default function Settings() {
     fetchOllamaModels(settings.vlm.ollama_url)
   }
 
+  // Pull/download an Ollama model with streaming progress
+  const pullOllamaModel = async (modelName: string) => {
+    if (!modelName.trim()) {
+      toast.error('Please enter a model name')
+      return
+    }
+
+    setIsPullingModel(true)
+    setPullProgress({ percent: 0, status: 'Starting download...' })
+
+    try {
+      // Get auth token for SSE request
+      const token = localStorage.getItem('access_token')
+      const streamUrl = systemApi.getOllamaPullStreamUrl(modelName.trim(), settings.vlm.ollama_url)
+
+      // Create EventSource for SSE with auth
+      const response = await fetch(streamUrl, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'text/event-stream'
+        }
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`)
+      }
+
+      const reader = response.body?.getReader()
+      if (!reader) {
+        throw new Error('No response body')
+      }
+
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6))
+
+              if (data.status === 'complete') {
+                toast.success(`Model ${modelName} downloaded successfully!`)
+                setNewOllamaModel('')
+                setPullProgress({ percent: 100, status: 'Complete!' })
+
+                if (data.models) {
+                  setOllamaModels(data.models)
+                } else {
+                  fetchOllamaModels(settings.vlm.ollama_url)
+                }
+
+                // Auto-select the new model
+                setSettings(prev => ({
+                  ...prev,
+                  vlm: { ...prev.vlm, model: modelName.trim() }
+                }))
+                setIsPullingModel(false)
+                return
+
+              } else if (data.status === 'error') {
+                toast.error(data.message || 'Download failed')
+                setIsPullingModel(false)
+                return
+
+              } else {
+                // Update progress
+                const status = data.status || 'Downloading...'
+                const displayStatus = status.length > 30 ? status.slice(0, 30) + '...' : status
+                setPullProgress({
+                  percent: data.percent || 0,
+                  status: `${displayStatus} ${data.percent ? `(${data.percent}%)` : ''}`
+                })
+              }
+            } catch {
+              // Ignore JSON parse errors
+            }
+          }
+        }
+      }
+
+      // If we get here without completion, refresh models anyway
+      fetchOllamaModels(settings.vlm.ollama_url)
+
+    } catch (error) {
+      console.error('Failed to pull model:', error)
+      toast.error('Failed to download model. Check Ollama connection.')
+    }
+
+    setIsPullingModel(false)
+    setPullProgress({ percent: 0, status: '' })
+  }
+
   // Fetch YOLO models
   const fetchYoloModels = async () => {
     try {
@@ -518,8 +624,8 @@ export default function Settings() {
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all ${activeTab === tab.id
-                    ? 'bg-primary-500/30 text-primary-300'
-                    : 'text-gray-300 hover:text-white hover:bg-white/10'
+                  ? 'bg-primary-500/30 text-primary-300'
+                  : 'text-gray-300 hover:text-white hover:bg-white/10'
                   }`}
               >
                 <tab.icon className="w-5 h-5" />
@@ -564,8 +670,8 @@ export default function Settings() {
                         }
                       }}
                       className={`p-4 rounded-xl border transition-all ${detectorType === 'yolo'
-                          ? 'bg-blue-500/20 border-blue-500/50 text-blue-300'
-                          : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/20'
+                        ? 'bg-blue-500/20 border-blue-500/50 text-blue-300'
+                        : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/20'
                         }`}
                     >
                       <div className="font-semibold mb-1">🎯 YOLO</div>
@@ -580,8 +686,8 @@ export default function Settings() {
                         }
                       }}
                       className={`p-4 rounded-xl border transition-all ${detectorType === 'owlv2'
-                          ? 'bg-purple-500/20 border-purple-500/50 text-purple-300'
-                          : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/20'
+                        ? 'bg-purple-500/20 border-purple-500/50 text-purple-300'
+                        : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/20'
                         }`}
                     >
                       <div className="font-semibold mb-1">🦉 OWLv2</div>
@@ -628,8 +734,8 @@ export default function Settings() {
                         <div
                           key={model.name}
                           className={`relative p-3 rounded-xl transition-all border cursor-pointer group ${settings.detection.model === model.name
-                              ? 'bg-primary-500/20 border-primary-500/50'
-                              : 'bg-white/5 border-white/10 hover:border-white/20 hover:bg-white/10'
+                            ? 'bg-primary-500/20 border-primary-500/50'
+                            : 'bg-white/5 border-white/10 hover:border-white/20 hover:bg-white/10'
                             }`}
                           onClick={() => {
                             // Activate the model and save to database
@@ -661,10 +767,10 @@ export default function Settings() {
                           </div>
                           <div className="flex items-center gap-2 mt-2">
                             <span className={`text-xs px-2 py-0.5 rounded-full ${model.category === 'owlv2'
-                                ? 'bg-purple-500/20 text-purple-400'
-                                : model.type === 'builtin'
-                                  ? 'bg-blue-500/20 text-blue-400'
-                                  : 'bg-cyan-500/20 text-cyan-400'
+                              ? 'bg-purple-500/20 text-purple-400'
+                              : model.type === 'builtin'
+                                ? 'bg-blue-500/20 text-blue-400'
+                                : 'bg-cyan-500/20 text-cyan-400'
                               }`}>
                               {model.category === 'owlv2' ? 'OWLv2' : model.type}
                             </span>
@@ -783,8 +889,8 @@ export default function Settings() {
                             })
                           }}
                           className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${settings.detection.enabled_classes.includes(cls)
-                              ? 'bg-primary-500/20 text-primary-400 border border-primary-500/30'
-                              : 'bg-white/5 text-gray-400 border border-white/10 hover:border-white/20'
+                            ? 'bg-primary-500/20 text-primary-400 border border-primary-500/30'
+                            : 'bg-white/5 text-gray-400 border border-white/10 hover:border-white/20'
                             }`}
                         >
                           {cls}
@@ -982,8 +1088,8 @@ export default function Settings() {
                           })
                         }
                         className={`flex-1 py-3 px-4 rounded-lg text-center transition-all font-medium ${settings.vlm.provider === provider.id
-                            ? 'bg-primary-500 text-white shadow-lg'
-                            : 'text-gray-400 hover:text-white hover:bg-white/10'
+                          ? 'bg-primary-500 text-white shadow-lg'
+                          : 'text-gray-400 hover:text-white hover:bg-white/10'
                           }`}
                       >
                         <span className="mr-2">{provider.icon}</span>
@@ -1040,8 +1146,8 @@ export default function Settings() {
                                 })
                               }
                               className={`p-3 rounded-xl text-left transition-all border ${settings.vlm.model === model
-                                  ? 'bg-primary-500/20 border-primary-500/50 text-primary-400'
-                                  : 'bg-white/5 border-white/10 text-gray-300 hover:border-white/20 hover:bg-white/10'
+                                ? 'bg-primary-500/20 border-primary-500/50 text-primary-400'
+                                : 'bg-white/5 border-white/10 text-gray-300 hover:border-white/20 hover:bg-white/10'
                                 }`}
                             >
                               <p className="font-medium truncate">{model.split(':')[0]}</p>
@@ -1070,6 +1176,68 @@ export default function Settings() {
                         </div>
                       )}
                     </div>
+
+                    {/* Download New Model */}
+                    {ollamaStatus === 'online' && (
+                      <div className="p-4 rounded-xl bg-gradient-to-r from-green-500/10 to-cyan-500/10 border border-green-500/20">
+                        <label className="block text-sm font-medium text-gray-300 mb-2">
+                          Download New Model
+                        </label>
+                        <div className="flex gap-3">
+                          <input
+                            type="text"
+                            value={newOllamaModel}
+                            onChange={(e) => setNewOllamaModel(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && !isPullingModel) {
+                                pullOllamaModel(newOllamaModel)
+                              }
+                            }}
+                            className="input flex-1"
+                            placeholder="e.g., llava, gemma3:4b, llama3.2"
+                            disabled={isPullingModel}
+                          />
+                          <button
+                            onClick={() => pullOllamaModel(newOllamaModel)}
+                            disabled={isPullingModel || !newOllamaModel.trim()}
+                            className="btn-primary px-4 flex items-center gap-2"
+                          >
+                            {isPullingModel ? (
+                              <>
+                                <ArrowPathIcon className="w-4 h-4 animate-spin" />
+                                Downloading...
+                              </>
+                            ) : (
+                              <>
+                                <CloudArrowUpIcon className="w-4 h-4" />
+                                Download
+                              </>
+                            )}
+                          </button>
+                        </div>
+
+                        {/* Progress Bar */}
+                        {isPullingModel && (
+                          <div className="mt-3">
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-xs text-gray-400">{pullProgress.status}</span>
+                              <span className="text-xs text-primary-400 font-medium">{pullProgress.percent}%</span>
+                            </div>
+                            <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-gradient-to-r from-primary-500 to-cyan-500 rounded-full transition-all duration-300 ease-out"
+                                style={{ width: `${pullProgress.percent}%` }}
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        <p className="text-xs text-gray-500 mt-2">
+                          Enter a model name from <a href="https://ollama.com/library" target="_blank" rel="noopener noreferrer" className="text-primary-400 hover:underline">ollama.com/library</a>.
+                          Popular VLM models: llava, llava-llama3, bakllava, gemma3:4b
+                        </p>
+                      </div>
+                    )}
                   </>
                 )}
 
@@ -1154,8 +1322,8 @@ export default function Settings() {
                               })
                             }
                             className={`p-3 rounded-xl text-left transition-all border ${settings.vlm.openai_model === model
-                                ? 'bg-primary-500/20 border-primary-500/50 text-primary-400'
-                                : 'bg-white/5 border-white/10 text-gray-300 hover:border-white/20 hover:bg-white/10'
+                              ? 'bg-primary-500/20 border-primary-500/50 text-primary-400'
+                              : 'bg-white/5 border-white/10 text-gray-300 hover:border-white/20 hover:bg-white/10'
                               }`}
                           >
                             <p className="font-medium truncate">{model}</p>
@@ -1232,8 +1400,8 @@ export default function Settings() {
                               })
                             }
                             className={`p-3 rounded-xl text-left transition-all border ${settings.vlm.gemini_model === model
-                                ? 'bg-primary-500/20 border-primary-500/50 text-primary-400'
-                                : 'bg-white/5 border-white/10 text-gray-300 hover:border-white/20 hover:bg-white/10'
+                              ? 'bg-primary-500/20 border-primary-500/50 text-primary-400'
+                              : 'bg-white/5 border-white/10 text-gray-300 hover:border-white/20 hover:bg-white/10'
                               }`}
                           >
                             <p className="font-medium truncate">{model.replace('gemini-', '').replace('models/', '')}</p>
@@ -1529,10 +1697,10 @@ export default function Settings() {
                           })
                         }}
                         className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${(settings.notifications.event_types || []).includes(event.id)
-                            ? event.id === 'all'
-                              ? 'bg-primary-500/30 text-primary-300 border border-primary-500/50'
-                              : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                            : 'bg-white/5 text-gray-400 border border-white/10 hover:border-white/20'
+                          ? event.id === 'all'
+                            ? 'bg-primary-500/30 text-primary-300 border border-primary-500/50'
+                            : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                          : 'bg-white/5 text-gray-400 border border-white/10 hover:border-white/20'
                           }`}
                       >
                         {event.id === 'all' ? '🌐 ' : ''}{event.label}

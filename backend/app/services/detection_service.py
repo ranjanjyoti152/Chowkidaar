@@ -18,6 +18,8 @@ from app.services.yolo_detector import get_detector
 from app.services.owlv2_detector import get_owlv2_detector, OWLv2Detector
 from app.services.stream_handler import get_stream_manager
 from app.services.vlm_service import get_unified_vlm_service
+from app.services.tiered_vlm_processor import get_tiered_vlm_processor, get_security_prompt
+from app.services.vlm_cache_service import get_vlm_cache
 from app.services.notification_service import send_event_notification
 from app.models.event import Event, EventType, EventSeverity
 from app.models.camera import Camera
@@ -526,9 +528,54 @@ class DetectionService:
         user_id: int,
         camera_id: int = None
     ):
-        """Generate VLM summary, intelligent severity assessment, and send notification"""
+        """Generate VLM summary, intelligent severity assessment, and send notification
+        
+        Uses tiered processing:
+        - SKIP tier: Template-based summaries for low-severity routine events
+        - FAST tier: Uses cache or fast local model for medium severity
+        - BEST tier: Uses best VLM provider for high/critical events
+        """
         try:
-            # Get VLM settings and configure
+            # Get tiered processor and cache
+            tiered_processor = get_tiered_vlm_processor()
+            vlm_cache = get_vlm_cache()
+            
+            # Get detection classes for cache key
+            detection_classes = tuple(sorted(set(d["class_name"].lower() for d in detections)))
+            current_hour = datetime.now().hour
+            
+            # Phase 1: Estimate severity from detections to determine tier
+            preliminary_severity = tiered_processor.estimate_severity_from_detections(
+                detections, hour=current_hour
+            )
+            vlm_tier = tiered_processor.get_vlm_tier(preliminary_severity)
+            logger.debug(f"Event {event_id}: preliminary_severity={preliminary_severity}, tier={vlm_tier}")
+            
+            # Phase 2: Check if we can skip VLM entirely (template-based)
+            should_skip, template_summary = tiered_processor.should_skip_vlm(
+                detections, preliminary_severity
+            )
+            
+            if should_skip and template_summary:
+                logger.info(f"⚡ Event {event_id}: Using template summary (skipping VLM)")
+                await self._update_event_with_summary(
+                    event_id, template_summary, preliminary_severity, 
+                    self._get_event_type(detections).value, user_id, camera_id
+                )
+                return
+            
+            # Phase 3: Check VLM cache for similar frames
+            if vlm_cache.is_available() and camera_id:
+                cached = await vlm_cache.get(frame, camera_id, detection_classes)
+                if cached:
+                    logger.info(f"⚡ Event {event_id}: Cache HIT - reusing summary")
+                    await self._update_event_with_summary(
+                        event_id, cached.summary, cached.severity, 
+                        cached.event_type, user_id, camera_id
+                    )
+                    return
+            
+            # Phase 4: Get VLM settings and configure
             vlm_settings = await self._get_vlm_settings(user_id)
             vlm = get_unified_vlm_service()
             
@@ -544,7 +591,7 @@ class DetectionService:
                     gemini_api_key=vlm_settings.get("gemini_api_key"),
                     gemini_model=vlm_settings.get("gemini_model", "gemini-2.0-flash-exp")
                 )
-                logger.debug(f"VLM configured for summary: provider={provider}")
+                logger.debug(f"VLM configured for summary: provider={provider}, tier={vlm_tier}")
             
             # Fetch camera context for intelligent severity assessment
             camera_context = ""
@@ -798,6 +845,15 @@ EVENT_TYPE: [Choose based on what's detected:
                     else:
                         logger.info(f"✨ Event {event_id} classified as '{event_label}' ({threat_level}) - {summary[:50]}...")
                     
+                    # Cache VLM response for similar future frames
+                    if camera_id and vlm_cache.is_available():
+                        await vlm_cache.put(
+                            frame, camera_id, detection_classes,
+                            summary, threat_level, event_type_str or "motion_detected"
+                        )
+                        cache_stats = vlm_cache.get_stats()
+                        logger.debug(f"VLM cache stats: {cache_stats['hit_rate_percent']}% hit rate, {cache_stats['cache_size']} entries")
+                    
                     # Send notification after summary is generated
                     # Fetch updated event for notification
                     result = await db.execute(
@@ -858,6 +914,79 @@ EVENT_TYPE: [Choose based on what's detected:
             return EventSeverity.medium
         
         return EventSeverity.low
+    
+    async def _update_event_with_summary(
+        self,
+        event_id: int,
+        summary: str,
+        severity: str,
+        event_type: str,
+        user_id: int,
+        camera_id: int = None
+    ):
+        """
+        Update event with summary (from template or cache).
+        Used for fast path when VLM is skipped or cached.
+        """
+        try:
+            # Map severity string to enum
+            severity_map = {
+                'low': EventSeverity.low,
+                'medium': EventSeverity.medium,
+                'high': EventSeverity.high,
+                'critical': EventSeverity.critical
+            }
+            severity_enum = severity_map.get(severity, EventSeverity.low)
+            
+            # Map event type string to enum
+            event_type_map = {
+                'person_detected': EventType.person_detected,
+                'vehicle_detected': EventType.vehicle_detected,
+                'animal_detected': EventType.animal_detected,
+                'object_detected': EventType.object_detected,
+                'motion_detected': EventType.motion_detected,
+                'fire_detected': EventType.fire_detected,
+                'smoke_detected': EventType.smoke_detected,
+                'delivery': EventType.delivery,
+                'visitor': EventType.visitor,
+                'suspicious': EventType.suspicious,
+                'intrusion': EventType.intrusion,
+            }
+            event_type_enum = event_type_map.get(event_type)
+            
+            update_values = {
+                "summary": summary,
+                "severity": severity_enum,
+                "detection_metadata": {
+                    "source": "template_or_cache",
+                    "analyzed_at": datetime.now().isoformat()
+                },
+                "summary_generated_at": datetime.now()
+            }
+            
+            if event_type_enum:
+                update_values["event_type"] = event_type_enum
+            
+            async with AsyncSessionLocal() as db:
+                await db.execute(
+                    update(Event)
+                    .where(Event.id == event_id)
+                    .values(**update_values)
+                )
+                await db.commit()
+                
+                logger.info(f"✅ Event {event_id} updated with template/cached summary")
+                
+                # Send notification
+                result = await db.execute(
+                    select(Event).where(Event.id == event_id)
+                )
+                updated_event = result.scalar_one_or_none()
+                if updated_event:
+                    await send_event_notification(updated_event, user_id)
+                    
+        except Exception as e:
+            logger.error(f"Failed to update event with summary: {e}")
     
     async def stop_all(self):
         """Stop all detection tasks"""

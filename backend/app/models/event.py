@@ -102,6 +102,12 @@ class Event(Base):
     summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     summary_generated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     
+    # Vector Embeddings (pgvector) - for semantic search
+    # Note: These are stored as raw bytes/lists since SQLAlchemy-pgvector
+    # may not be installed. The actual Vector type is handled by the migration.
+    # text_embedding: 384 dims (all-MiniLM-L6-v2)
+    # image_embedding: 512 dims (CLIP ViT-B/32)
+    
     # Timing
     timestamp: Mapped[datetime] = mapped_column(
         DateTime,

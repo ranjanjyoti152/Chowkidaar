@@ -179,6 +179,202 @@ async def test_ollama_connection(
         }
 
 
+@router.post("/ollama/pull")
+async def pull_ollama_model(
+    current_user: User = Depends(get_current_user),
+    model_name: str = None,
+    url: str = None
+):
+    """
+    Pull/download an Ollama model (non-streaming fallback).
+    Use /ollama/pull-stream for progress updates.
+    """
+    import httpx
+    
+    if not model_name:
+        raise HTTPException(status_code=400, detail="model_name is required")
+    
+    pull_url = url or settings.ollama_base_url
+    
+    try:
+        async with httpx.AsyncClient(timeout=600.0) as client:
+            response = await client.post(
+                f"{pull_url}/api/pull",
+                json={"name": model_name, "stream": False}
+            )
+            
+            if response.status_code == 200:
+                models_response = await client.get(f"{pull_url}/api/tags")
+                models = []
+                if models_response.status_code == 200:
+                    data = models_response.json()
+                    models = [m["name"] for m in data.get("models", [])]
+                
+                return {
+                    "status": "success",
+                    "message": f"Model '{model_name}' downloaded successfully",
+                    "model": model_name,
+                    "models": models
+                }
+            else:
+                error_text = response.text[:500] if response.text else "Unknown error"
+                return {
+                    "status": "error",
+                    "message": f"Failed to pull model: {error_text}",
+                    "model": model_name
+                }
+                
+    except httpx.TimeoutException:
+        return {
+            "status": "timeout",
+            "message": f"Model download timed out.",
+            "model": model_name
+        }
+    except httpx.ConnectError:
+        return {
+            "status": "offline",
+            "message": f"Cannot connect to Ollama at {pull_url}.",
+            "model": model_name
+        }
+    except Exception as e:
+        logger.error(f"Ollama pull error: {e}")
+        return {"status": "error", "message": str(e), "model": model_name}
+
+
+@router.get("/ollama/pull-stream")
+async def pull_ollama_model_stream(
+    model_name: str,
+    url: str = None,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Pull/download an Ollama model with streaming progress via Server-Sent Events.
+    Returns real-time download progress updates.
+    """
+    import httpx
+    import json
+    from fastapi.responses import StreamingResponse
+    
+    if not model_name:
+        raise HTTPException(status_code=400, detail="model_name is required")
+    
+    pull_url = url or settings.ollama_base_url
+    
+    async def generate_progress():
+        try:
+            async with httpx.AsyncClient(timeout=600.0) as client:
+                async with client.stream(
+                    "POST",
+                    f"{pull_url}/api/pull",
+                    json={"name": model_name, "stream": True},
+                    timeout=600.0
+                ) as response:
+                    if response.status_code != 200:
+                        yield f"data: {json.dumps({'status': 'error', 'message': 'Failed to connect to Ollama'})}\n\n"
+                        return
+                    
+                    async for line in response.aiter_lines():
+                        if not line:
+                            continue
+                        
+                        try:
+                            data = json.loads(line)
+                            
+                            # Parse Ollama progress format
+                            status = data.get("status", "")
+                            completed = data.get("completed", 0)
+                            total = data.get("total", 0)
+                            digest = data.get("digest", "")
+                            
+                            # Calculate progress percentage
+                            if total > 0:
+                                percent = round((completed / total) * 100, 1)
+                            else:
+                                percent = 0
+                            
+                            progress_data = {
+                                "status": status,
+                                "percent": percent,
+                                "completed": completed,
+                                "total": total,
+                                "digest": digest[:12] if digest else ""
+                            }
+                            
+                            yield f"data: {json.dumps(progress_data)}\n\n"
+                            
+                            # Check if download is complete
+                            if status == "success" or (status == "" and completed == total and total > 0):
+                                # Fetch updated model list
+                                models_response = await client.get(f"{pull_url}/api/tags")
+                                models = []
+                                if models_response.status_code == 200:
+                                    models_data = models_response.json()
+                                    models = [m["name"] for m in models_data.get("models", [])]
+                                
+                                yield f"data: {json.dumps({'status': 'complete', 'message': 'Download complete', 'models': models})}\n\n"
+                                
+                        except json.JSONDecodeError:
+                            continue
+                            
+        except httpx.ConnectError:
+            yield f"data: {json.dumps({'status': 'error', 'message': 'Cannot connect to Ollama'})}\n\n"
+        except httpx.TimeoutException:
+            yield f"data: {json.dumps({'status': 'error', 'message': 'Download timed out'})}\n\n"
+        except Exception as e:
+            logger.error(f"Ollama pull stream error: {e}")
+            yield f"data: {json.dumps({'status': 'error', 'message': str(e)})}\n\n"
+    
+    return StreamingResponse(
+        generate_progress(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
+
+
+@router.delete("/ollama/model/{model_name}")
+async def delete_ollama_model(
+    model_name: str,
+    current_user: User = Depends(require_admin),
+    url: str = None
+):
+    """Delete an Ollama model from the server."""
+    import httpx
+    
+    delete_url = url or settings.ollama_base_url
+    
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.delete(
+                f"{delete_url}/api/delete",
+                json={"name": model_name}
+            )
+            
+            if response.status_code == 200:
+                return {
+                    "status": "success",
+                    "message": f"Model '{model_name}' deleted successfully"
+                }
+            else:
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=f"Failed to delete model: {response.text}"
+                )
+    except httpx.ConnectError:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Cannot connect to Ollama at {delete_url}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
+
+
 @router.post("/llm/test")
 async def test_llm_provider(
     current_user: User = Depends(get_current_user),
