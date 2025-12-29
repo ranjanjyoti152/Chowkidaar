@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -27,6 +27,7 @@ const statusConfig: Record<CameraStatus, { color: string; label: string }> = {
 export default function Cameras() {
   const [showAddModal, setShowAddModal] = useState(false)
   const [editingCamera, setEditingCamera] = useState<Camera | null>(null)
+  const [fullscreenCamera, setFullscreenCamera] = useState<Camera | null>(null)
   const queryClient = useQueryClient()
   const { token } = useAuthStore()
 
@@ -84,6 +85,17 @@ export default function Cameras() {
     onError: () => toast.error('Connection test failed'),
   })
 
+  // Handle ESC key to close fullscreen modal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && fullscreenCamera) {
+        setFullscreenCamera(null)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [fullscreenCamera])
+
   return (
     <div className="page-container">
       {/* Header */}
@@ -121,8 +133,11 @@ export default function Cameras() {
               animate={{ opacity: 1, scale: 1 }}
               className="glass-card overflow-hidden group"
             >
-              {/* Video Preview */}
-              <div className="relative aspect-video bg-dark-400">
+              {/* Video Preview - Click to open fullscreen */}
+              <div
+                className="relative aspect-video bg-dark-400 cursor-pointer"
+                onClick={() => setFullscreenCamera(camera)}
+              >
                 {camera.status === 'online' ? (
                   <img
                     src={`${cameraApi.getStreamUrl(camera.id)}&token=${token}`}
@@ -254,6 +269,134 @@ export default function Cameras() {
             }}
             isLoading={false}
           />
+        )}
+      </AnimatePresence>
+
+      {/* Fullscreen Camera Modal */}
+      <AnimatePresence>
+        {fullscreenCamera && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md"
+            onClick={() => setFullscreenCamera(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              onClick={(e) => e.stopPropagation()}
+              className="relative w-[95vw] max-w-7xl"
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center shadow-lg shadow-primary-500/40">
+                    <VideoCameraIcon className="w-6 h-6 text-white" />
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-bold text-white">{fullscreenCamera.name}</h2>
+                    <p className="text-gray-400">{fullscreenCamera.location || 'No location'}</p>
+                  </div>
+                  <span className={`badge ${statusConfig[fullscreenCamera.status].color} text-white border-none ml-4`}>
+                    {statusConfig[fullscreenCamera.status].label}
+                  </span>
+                </div>
+                <button
+                  onClick={() => setFullscreenCamera(null)}
+                  className="p-3 rounded-xl bg-white/10 text-white hover:bg-white/20 transition-all duration-200"
+                >
+                  <XMarkIcon className="w-6 h-6" />
+                </button>
+              </div>
+
+              {/* Video Feed */}
+              <div className="glass-card overflow-hidden rounded-2xl">
+                <div className="relative aspect-video bg-dark-400">
+                  {fullscreenCamera.status === 'online' ? (
+                    <img
+                      src={`${cameraApi.getStreamUrl(fullscreenCamera.id)}&token=${token}`}
+                      alt={fullscreenCamera.name}
+                      className="w-full h-full object-contain"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex flex-col items-center justify-center">
+                      <VideoCameraIcon className="w-24 h-24 text-gray-600 mb-4" />
+                      <p className="text-gray-400 text-lg">Camera is {fullscreenCamera.status}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Controls */}
+              <div className="flex items-center justify-center gap-4 mt-4">
+                {fullscreenCamera.status === 'online' ? (
+                  <button
+                    onClick={() => {
+                      stopStreamMutation.mutate(fullscreenCamera.id)
+                      setFullscreenCamera(null)
+                    }}
+                    className="btn-danger flex items-center gap-2"
+                  >
+                    <StopIcon className="w-5 h-5" />
+                    Stop Stream
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => {
+                      startStreamMutation.mutate(fullscreenCamera.id)
+                      setFullscreenCamera(null)
+                    }}
+                    className="btn-success flex items-center gap-2"
+                  >
+                    <PlayIcon className="w-5 h-5" />
+                    Start Stream
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    testMutation.mutate(fullscreenCamera.id)
+                  }}
+                  className="btn-primary flex items-center gap-2"
+                >
+                  <SignalIcon className="w-5 h-5" />
+                  Test Connection
+                </button>
+                <button
+                  onClick={() => {
+                    setEditingCamera(fullscreenCamera)
+                    setFullscreenCamera(null)
+                  }}
+                  className="btn-secondary flex items-center gap-2"
+                >
+                  <PencilIcon className="w-5 h-5" />
+                  Edit Camera
+                </button>
+              </div>
+
+              {/* Stats */}
+              <div className="flex items-center justify-center gap-8 mt-4 text-sm">
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-400">Events Today:</span>
+                  <span className="font-semibold text-white">{fullscreenCamera.events_today}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-400">FPS:</span>
+                  <span className="font-semibold text-white">{fullscreenCamera.fps}</span>
+                </div>
+                {fullscreenCamera.detection_enabled && (
+                  <span className="badge-primary">Detection ON</span>
+                )}
+              </div>
+
+              {/* Hint */}
+              <p className="text-center text-gray-500 text-sm mt-4">
+                Press ESC or click outside to close
+              </p>
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>

@@ -66,6 +66,7 @@ export interface Camera {
   last_seen?: string
   error_message?: string
   owner_id: number
+  events_today?: number
   created_at: string
   updated_at: string
 }
@@ -102,7 +103,7 @@ export interface CameraTestResult {
 }
 
 // Event Types
-export type EventType = 
+export type EventType =
   | 'person_detected'
   | 'vehicle_detected'
   | 'fire_detected'

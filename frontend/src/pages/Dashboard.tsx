@@ -1,15 +1,16 @@
+import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { motion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import {
   VideoCameraIcon,
   BellAlertIcon,
   CpuChipIcon,
   ExclamationTriangleIcon,
-  CheckCircleIcon,
+  XMarkIcon,
 } from '@heroicons/react/24/outline'
 import { cameraApi, eventApi, systemApi } from '../services'
 import { useAuthStore } from '../store/authStore'
-import type { EventSeverity } from '../types'
+import type { EventSeverity, CameraWithStats } from '../types'
 
 const severityColors: Record<EventSeverity, string> = {
   low: 'bg-blue-500/15 text-blue-300 border-blue-500/30',
@@ -38,10 +39,23 @@ const itemVariants = {
 
 export default function Dashboard() {
   const { token } = useAuthStore()
+  const [fullscreenCamera, setFullscreenCamera] = useState<CameraWithStats | null>(null)
+
   const { data: cameras, isLoading: camerasLoading } = useQuery({
     queryKey: ['cameras'],
     queryFn: cameraApi.listCameras,
   })
+
+  // Handle ESC key to close fullscreen modal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && fullscreenCamera) {
+        setFullscreenCamera(null)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [fullscreenCamera])
 
   const { data: events, isLoading: eventsLoading } = useQuery({
     queryKey: ['events', { limit: 10 }],
@@ -174,6 +188,7 @@ export default function Dashboard() {
                     transition={{ delay: idx * 0.1 }}
                     whileHover={{ scale: 1.02 }}
                     className="relative video-container group cursor-pointer"
+                    onClick={() => setFullscreenCamera(camera)}
                   >
                     {camera.status === 'online' ? (
                       <img
@@ -194,8 +209,8 @@ export default function Dashboard() {
                           </span>
                           <span
                             className={`w-2 h-2 rounded-full ${camera.status === 'online'
-                                ? 'bg-green-400 shadow-lg shadow-green-400/50'
-                                : 'bg-gray-500'
+                              ? 'bg-green-400 shadow-lg shadow-green-400/50'
+                              : 'bg-gray-500'
                               }`}
                           />
                         </div>
@@ -376,6 +391,75 @@ export default function Dashboard() {
           </div>
         </motion.div>
       )}
+
+      {/* Fullscreen Camera Modal */}
+      <AnimatePresence>
+        {fullscreenCamera && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm"
+            onClick={() => setFullscreenCamera(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              transition={{ type: 'spring', damping: 25 }}
+              className="relative w-[90vw] h-[85vh] max-w-7xl glass-card overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="absolute top-0 left-0 right-0 z-10 flex items-center justify-between p-4 bg-gradient-to-b from-black/80 to-transparent">
+                <div className="flex items-center gap-3">
+                  <h2 className="text-xl font-semibold text-white">{fullscreenCamera.name}</h2>
+                  <span
+                    className={`px-2 py-1 rounded-full text-xs font-medium ${fullscreenCamera.status === 'online'
+                      ? 'bg-green-500/20 text-green-400 border border-green-500/30'
+                      : 'bg-gray-500/20 text-gray-400 border border-gray-500/30'
+                      }`}
+                  >
+                    {fullscreenCamera.status}
+                  </span>
+                </div>
+                <button
+                  onClick={() => setFullscreenCamera(null)}
+                  className="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
+                >
+                  <XMarkIcon className="w-6 h-6 text-white" />
+                </button>
+              </div>
+
+              {/* Video Stream */}
+              <div className="w-full h-full bg-dark-400 flex items-center justify-center">
+                {fullscreenCamera.status === 'online' ? (
+                  <img
+                    src={`${cameraApi.getStreamUrl(fullscreenCamera.id)}&token=${token}`}
+                    alt={fullscreenCamera.name}
+                    className="w-full h-full object-contain"
+                  />
+                ) : (
+                  <div className="flex flex-col items-center gap-4">
+                    <VideoCameraIcon className="w-24 h-24 text-gray-600" />
+                    <p className="text-gray-400 text-lg">Camera Offline</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Footer Info */}
+              <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/80 to-transparent">
+                <div className="flex items-center justify-between text-sm text-gray-300">
+                  <span>Press ESC or click outside to close</span>
+                  {fullscreenCamera.location && (
+                    <span>📍 {fullscreenCamera.location}</span>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }

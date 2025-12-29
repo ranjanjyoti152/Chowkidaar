@@ -123,12 +123,13 @@ export default function Settings() {
   const [isLoadingClasses, setIsLoadingClasses] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
   const [activeYoloModel, setActiveYoloModel] = useState<string>('')
+  const [settingsLoaded, setSettingsLoaded] = useState(false)  // Track if settings loaded from API
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [newOwlQuery, setNewOwlQuery] = useState('')  // For adding new OWLv2 queries
-  
+
   // Derive detector type from settings model (not separate state)
   const detectorType = settings.detection.model.startsWith('owlv2') ? 'owlv2' : 'yolo'
-  
+
   // Provider-specific states
   const [openaiModels, setOpenaiModels] = useState<string[]>([])
   const [openaiStatus, setOpenaiStatus] = useState<'checking' | 'online' | 'offline' | 'idle'>('idle')
@@ -288,6 +289,7 @@ export default function Settings() {
         if (mergedSettings.vlm?.ollama_url) {
           fetchOllamaModels(mergedSettings.vlm.ollama_url)
         }
+        setSettingsLoaded(true)  // Mark settings as loaded from API
         return mergedSettings
       } catch {
         // Only use defaults if fetch fails
@@ -386,7 +388,7 @@ export default function Settings() {
         ...prev,
         detection: {
           ...prev.detection,
-          enabled_classes: prev.detection.enabled_classes.filter(c => 
+          enabled_classes: prev.detection.enabled_classes.filter(c =>
             response.classes?.includes(c)
           )
         }
@@ -413,7 +415,7 @@ export default function Settings() {
       const formData = new FormData()
       formData.append('file', file)
       formData.append('name', file.name.replace('.pt', ''))
-      
+
       await systemApi.uploadYoloModel(formData)
       toast.success('Model uploaded successfully')
       fetchYoloModels()
@@ -427,7 +429,7 @@ export default function Settings() {
   // Delete custom model
   const handleDeleteModel = async (modelName: string) => {
     if (!confirm(`Delete model "${modelName}"?`)) return
-    
+
     try {
       await systemApi.deleteYoloModel(modelName)
       toast.success('Model deleted')
@@ -442,14 +444,24 @@ export default function Settings() {
     try {
       await systemApi.activateYoloModel(modelName)
       setActiveYoloModel(modelName)
-      // Update settings and save to database
-      const newSettings = {
-        ...settings,
-        detection: { ...settings.detection, model: modelName }
+      // Update settings and save to database ONLY if settings have been loaded from API
+      // This prevents overwriting saved settings with defaults
+      if (settingsLoaded) {
+        const newSettings = {
+          ...settings,
+          detection: { ...settings.detection, model: modelName }
+        }
+        setSettings(newSettings)
+        // Auto-save to database after model activation
+        saveMutation.mutate(newSettings)
+      } else {
+        console.warn('Skipping auto-save - settings not loaded from API yet')
+        // Just update local state, don't save
+        setSettings(prev => ({
+          ...prev,
+          detection: { ...prev.detection, model: modelName }
+        }))
       }
-      setSettings(newSettings)
-      // Auto-save to database after model activation
-      saveMutation.mutate(newSettings)
       // Fetch model classes only for YOLO models (not OWLv2)
       if (!modelName.startsWith('owlv2')) {
         fetchModelClasses(modelName)
@@ -502,14 +514,13 @@ export default function Settings() {
         <div className="w-48 flex-shrink-0">
           <nav className="space-y-1">
             {tabs.map((tab) => (
-                <button
+              <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all ${
-                  activeTab === tab.id
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all ${activeTab === tab.id
                     ? 'bg-primary-500/30 text-primary-300'
                     : 'text-gray-300 hover:text-white hover:bg-white/10'
-                }`}
+                  }`}
               >
                 <tab.icon className="w-5 h-5" />
                 <span className="font-medium">{tab.name}</span>
@@ -552,11 +563,10 @@ export default function Settings() {
                           handleActivateModel(firstYolo.name)
                         }
                       }}
-                      className={`p-4 rounded-xl border transition-all ${
-                        detectorType === 'yolo'
+                      className={`p-4 rounded-xl border transition-all ${detectorType === 'yolo'
                           ? 'bg-blue-500/20 border-blue-500/50 text-blue-300'
                           : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/20'
-                      }`}
+                        }`}
                     >
                       <div className="font-semibold mb-1">🎯 YOLO</div>
                       <div className="text-xs opacity-70">Fast fixed-class detection (80 classes)</div>
@@ -569,11 +579,10 @@ export default function Settings() {
                           handleActivateModel(firstOwl.name)
                         }
                       }}
-                      className={`p-4 rounded-xl border transition-all ${
-                        detectorType === 'owlv2'
+                      className={`p-4 rounded-xl border transition-all ${detectorType === 'owlv2'
                           ? 'bg-purple-500/20 border-purple-500/50 text-purple-300'
                           : 'bg-white/5 border-white/10 text-gray-400 hover:border-white/20'
-                      }`}
+                        }`}
                     >
                       <div className="font-semibold mb-1">🦉 OWLv2</div>
                       <div className="text-xs opacity-70">Open-vocabulary - detect anything by text</div>
@@ -588,95 +597,92 @@ export default function Settings() {
                       {detectorType === 'yolo' ? 'YOLO Models' : 'OWLv2 Models'}
                     </label>
                     {detectorType === 'yolo' && (
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="file"
-                        ref={fileInputRef}
-                        onChange={handleModelUpload}
-                        accept=".pt"
-                        className="hidden"
-                      />
-                      <button
-                        onClick={() => fileInputRef.current?.click()}
-                        disabled={isUploading}
-                        className="btn-secondary text-sm px-3 py-1.5 flex items-center gap-1.5"
-                      >
-                        {isUploading ? (
-                          <ArrowPathIcon className="w-4 h-4 animate-spin" />
-                        ) : (
-                          <CloudArrowUpIcon className="w-4 h-4" />
-                        )}
-                        Upload Custom
-                      </button>
-                    </div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="file"
+                          ref={fileInputRef}
+                          onChange={handleModelUpload}
+                          accept=".pt"
+                          className="hidden"
+                        />
+                        <button
+                          onClick={() => fileInputRef.current?.click()}
+                          disabled={isUploading}
+                          className="btn-secondary text-sm px-3 py-1.5 flex items-center gap-1.5"
+                        >
+                          {isUploading ? (
+                            <ArrowPathIcon className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <CloudArrowUpIcon className="w-4 h-4" />
+                          )}
+                          Upload Custom
+                        </button>
+                      </div>
                     )}
                   </div>
-                  
+
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
                     {yoloModels
                       .filter(model => detectorType === 'owlv2' ? model.category === 'owlv2' : model.category !== 'owlv2')
                       .map((model) => (
-                      <div
-                        key={model.name}
-                        className={`relative p-3 rounded-xl transition-all border cursor-pointer group ${
-                          settings.detection.model === model.name
-                            ? 'bg-primary-500/20 border-primary-500/50'
-                            : 'bg-white/5 border-white/10 hover:border-white/20 hover:bg-white/10'
-                        }`}
-                        onClick={() => {
-                          // Activate the model and save to database
-                          handleActivateModel(model.name)
-                        }}
-                      >
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1 min-w-0">
-                            <p className={`font-medium truncate ${
-                              settings.detection.model === model.name ? 'text-primary-400' : 'text-gray-200'
-                            }`}>
-                              {model.display_name || model.name.split('/').pop()?.replace('.pt', '')}
-                            </p>
-                            <p className="text-xs text-gray-500 mt-0.5">{model.size}</p>
-                            {model.description && (
-                              <p className="text-xs text-gray-500 mt-1 line-clamp-2">{model.description}</p>
+                        <div
+                          key={model.name}
+                          className={`relative p-3 rounded-xl transition-all border cursor-pointer group ${settings.detection.model === model.name
+                              ? 'bg-primary-500/20 border-primary-500/50'
+                              : 'bg-white/5 border-white/10 hover:border-white/20 hover:bg-white/10'
+                            }`}
+                          onClick={() => {
+                            // Activate the model and save to database
+                            handleActivateModel(model.name)
+                          }}
+                        >
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1 min-w-0">
+                              <p className={`font-medium truncate ${settings.detection.model === model.name ? 'text-primary-400' : 'text-gray-200'
+                                }`}>
+                                {model.display_name || model.name.split('/').pop()?.replace('.pt', '')}
+                              </p>
+                              <p className="text-xs text-gray-500 mt-0.5">{model.size}</p>
+                              {model.description && (
+                                <p className="text-xs text-gray-500 mt-1 line-clamp-2">{model.description}</p>
+                              )}
+                            </div>
+                            {model.type === 'custom' && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleDeleteModel(model.name)
+                                }}
+                                className="opacity-0 group-hover:opacity-100 p-1 rounded text-red-400 hover:bg-red-500/20 transition-all"
+                              >
+                                <TrashIcon className="w-4 h-4" />
+                              </button>
                             )}
                           </div>
-                          {model.type === 'custom' && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                handleDeleteModel(model.name)
-                              }}
-                              className="opacity-0 group-hover:opacity-100 p-1 rounded text-red-400 hover:bg-red-500/20 transition-all"
-                            >
-                              <TrashIcon className="w-4 h-4" />
-                            </button>
-                          )}
+                          <div className="flex items-center gap-2 mt-2">
+                            <span className={`text-xs px-2 py-0.5 rounded-full ${model.category === 'owlv2'
+                                ? 'bg-purple-500/20 text-purple-400'
+                                : model.type === 'builtin'
+                                  ? 'bg-blue-500/20 text-blue-400'
+                                  : 'bg-cyan-500/20 text-cyan-400'
+                              }`}>
+                              {model.category === 'owlv2' ? 'OWLv2' : model.type}
+                            </span>
+                            {settings.detection.model === model.name && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleActivateModel(model.name)
+                                }}
+                                className="text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 flex items-center gap-1"
+                              >
+                                <PlayIcon className="w-3 h-3" />
+                                Activate
+                              </button>
+                            )}
+                          </div>
                         </div>
-                        <div className="flex items-center gap-2 mt-2">
-                          <span className={`text-xs px-2 py-0.5 rounded-full ${
-                            model.category === 'owlv2'
-                              ? 'bg-purple-500/20 text-purple-400'
-                              : model.type === 'builtin' 
-                                ? 'bg-blue-500/20 text-blue-400' 
-                                : 'bg-cyan-500/20 text-cyan-400'
-                          }`}>
-                            {model.category === 'owlv2' ? 'OWLv2' : model.type}
-                          </span>
-                          {settings.detection.model === model.name && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                handleActivateModel(model.name)
-                              }}
-                              className="text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 flex items-center gap-1"
-                            >
-                              <PlayIcon className="w-3 h-3" />
-                              Activate
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    ))}
+                      ))}
                   </div>
                 </div>
 
@@ -728,183 +734,182 @@ export default function Settings() {
 
                 {/* Detection Classes - Only for YOLO */}
                 {detectorType === 'yolo' && (
-                <div>
-                  <div className="flex items-center justify-between mb-3">
-                    <label className="text-sm font-medium text-gray-400">
-                      Detection Classes
-                    </label>
-                    <div className="flex items-center gap-2">
-                      {isLoadingClasses && (
-                        <ArrowPathIcon className="w-4 h-4 text-gray-500 animate-spin" />
-                      )}
-                      <span className="text-xs text-gray-500">
-                        {settings.detection.enabled_classes.length}/{modelClasses.length} selected
-                      </span>
-                      <button
-                        onClick={() => setSettings({
-                          ...settings,
-                          detection: { ...settings.detection, enabled_classes: [...modelClasses] }
-                        })}
-                        className="text-xs text-primary-400 hover:text-primary-300"
-                      >
-                        Select All
-                      </button>
-                      <button
-                        onClick={() => setSettings({
-                          ...settings,
-                          detection: { ...settings.detection, enabled_classes: [] }
-                        })}
-                        className="text-xs text-gray-400 hover:text-gray-300"
-                      >
-                        Clear
-                      </button>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap gap-2 max-h-48 overflow-y-auto p-2 bg-white/5 rounded-xl">
-                    {modelClasses.map((cls) => (
-                      <button
-                        key={cls}
-                        onClick={() => {
-                          const enabled = settings.detection.enabled_classes
-                          setSettings({
-                            ...settings,
-                            detection: {
-                              ...settings.detection,
-                              enabled_classes: enabled.includes(cls)
-                                ? enabled.filter((c) => c !== cls)
-                                : [...enabled, cls],
-                            },
-                          })
-                        }}
-                        className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                          settings.detection.enabled_classes.includes(cls)
-                            ? 'bg-primary-500/20 text-primary-400 border border-primary-500/30'
-                            : 'bg-white/5 text-gray-400 border border-white/10 hover:border-white/20'
-                        }`}
-                      >
-                        {cls}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                )}
-
-                {/* OWLv2 Custom Queries - Only for OWLv2 */}
-                {detectorType === 'owlv2' && (
-                <div className="p-4 rounded-xl bg-gradient-to-r from-purple-500/10 to-pink-500/10 border border-purple-500/20">
-                  <div className="flex items-center justify-between mb-3">
-                    <label className="text-sm font-medium text-gray-300">
-                      🦉 OWLv2 Detection Queries
-                    </label>
-                    <span className="text-xs text-gray-500">
-                      {settings.detection.owlv2_queries?.length || 0} queries
-                    </span>
-                  </div>
-                  <p className="text-xs text-gray-400 mb-3">
-                    Enter text descriptions of objects you want to detect. OWLv2 can find anything you describe!
-                  </p>
-                  
-                  {/* Add new query */}
-                  <div className="flex gap-2 mb-3">
-                    <input
-                      type="text"
-                      value={newOwlQuery}
-                      onChange={(e) => setNewOwlQuery(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && newOwlQuery.trim()) {
-                          const queries = settings.detection.owlv2_queries || []
-                          if (!queries.includes(newOwlQuery.trim())) {
-                            setSettings({
-                              ...settings,
-                              detection: {
-                                ...settings.detection,
-                                owlv2_queries: [...queries, newOwlQuery.trim()]
-                              }
-                            })
-                          }
-                          setNewOwlQuery('')
-                        }
-                      }}
-                      placeholder="e.g., 'a person wearing a red shirt', 'a delivery package'"
-                      className="input flex-1 text-sm"
-                    />
-                    <button
-                      onClick={() => {
-                        if (newOwlQuery.trim()) {
-                          const queries = settings.detection.owlv2_queries || []
-                          if (!queries.includes(newOwlQuery.trim())) {
-                            setSettings({
-                              ...settings,
-                              detection: {
-                                ...settings.detection,
-                                owlv2_queries: [...queries, newOwlQuery.trim()]
-                              }
-                            })
-                          }
-                          setNewOwlQuery('')
-                        }
-                      }}
-                      className="btn-primary text-sm px-4"
-                    >
-                      Add
-                    </button>
-                  </div>
-
-                  {/* Query list */}
-                  <div className="flex flex-wrap gap-2 max-h-48 overflow-y-auto">
-                    {(settings.detection.owlv2_queries || []).map((query, index) => (
-                      <div
-                        key={index}
-                        className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-purple-500/20 text-purple-300 border border-purple-500/30 text-sm"
-                      >
-                        <span>{query}</span>
+                  <div>
+                    <div className="flex items-center justify-between mb-3">
+                      <label className="text-sm font-medium text-gray-400">
+                        Detection Classes
+                      </label>
+                      <div className="flex items-center gap-2">
+                        {isLoadingClasses && (
+                          <ArrowPathIcon className="w-4 h-4 text-gray-500 animate-spin" />
+                        )}
+                        <span className="text-xs text-gray-500">
+                          {settings.detection.enabled_classes.length}/{modelClasses.length} selected
+                        </span>
                         <button
-                          onClick={() => {
-                            const queries = settings.detection.owlv2_queries || []
-                            setSettings({
-                              ...settings,
-                              detection: {
-                                ...settings.detection,
-                                owlv2_queries: queries.filter((_, i) => i !== index)
-                              }
-                            })
-                          }}
-                          className="ml-1 text-purple-400 hover:text-red-400 transition-colors"
+                          onClick={() => setSettings({
+                            ...settings,
+                            detection: { ...settings.detection, enabled_classes: [...modelClasses] }
+                          })}
+                          className="text-xs text-primary-400 hover:text-primary-300"
                         >
-                          ×
+                          Select All
+                        </button>
+                        <button
+                          onClick={() => setSettings({
+                            ...settings,
+                            detection: { ...settings.detection, enabled_classes: [] }
+                          })}
+                          className="text-xs text-gray-400 hover:text-gray-300"
+                        >
+                          Clear
                         </button>
                       </div>
-                    ))}
-                  </div>
-
-                  {/* Quick add suggestions */}
-                  <div className="mt-3 pt-3 border-t border-white/10">
-                    <p className="text-xs text-gray-500 mb-2">Quick add:</p>
-                    <div className="flex flex-wrap gap-1">
-                      {['a person running', 'a fire or flames', 'a weapon', 'a package', 'a vehicle', 'smoke'].map(suggestion => (
+                    </div>
+                    <div className="flex flex-wrap gap-2 max-h-48 overflow-y-auto p-2 bg-white/5 rounded-xl">
+                      {modelClasses.map((cls) => (
                         <button
-                          key={suggestion}
+                          key={cls}
                           onClick={() => {
-                            const queries = settings.detection.owlv2_queries || []
-                            if (!queries.includes(suggestion)) {
-                              setSettings({
-                                ...settings,
-                                detection: {
-                                  ...settings.detection,
-                                  owlv2_queries: [...queries, suggestion]
-                                }
-                              })
-                            }
+                            const enabled = settings.detection.enabled_classes
+                            setSettings({
+                              ...settings,
+                              detection: {
+                                ...settings.detection,
+                                enabled_classes: enabled.includes(cls)
+                                  ? enabled.filter((c) => c !== cls)
+                                  : [...enabled, cls],
+                              },
+                            })
                           }}
-                          disabled={(settings.detection.owlv2_queries || []).includes(suggestion)}
-                          className="text-xs px-2 py-1 rounded bg-white/5 text-gray-400 hover:bg-white/10 hover:text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                          className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${settings.detection.enabled_classes.includes(cls)
+                              ? 'bg-primary-500/20 text-primary-400 border border-primary-500/30'
+                              : 'bg-white/5 text-gray-400 border border-white/10 hover:border-white/20'
+                            }`}
                         >
-                          + {suggestion}
+                          {cls}
                         </button>
                       ))}
                     </div>
                   </div>
-                </div>
+                )}
+
+                {/* OWLv2 Custom Queries - Only for OWLv2 */}
+                {detectorType === 'owlv2' && (
+                  <div className="p-4 rounded-xl bg-gradient-to-r from-purple-500/10 to-pink-500/10 border border-purple-500/20">
+                    <div className="flex items-center justify-between mb-3">
+                      <label className="text-sm font-medium text-gray-300">
+                        🦉 OWLv2 Detection Queries
+                      </label>
+                      <span className="text-xs text-gray-500">
+                        {settings.detection.owlv2_queries?.length || 0} queries
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-400 mb-3">
+                      Enter text descriptions of objects you want to detect. OWLv2 can find anything you describe!
+                    </p>
+
+                    {/* Add new query */}
+                    <div className="flex gap-2 mb-3">
+                      <input
+                        type="text"
+                        value={newOwlQuery}
+                        onChange={(e) => setNewOwlQuery(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && newOwlQuery.trim()) {
+                            const queries = settings.detection.owlv2_queries || []
+                            if (!queries.includes(newOwlQuery.trim())) {
+                              setSettings({
+                                ...settings,
+                                detection: {
+                                  ...settings.detection,
+                                  owlv2_queries: [...queries, newOwlQuery.trim()]
+                                }
+                              })
+                            }
+                            setNewOwlQuery('')
+                          }
+                        }}
+                        placeholder="e.g., 'a person wearing a red shirt', 'a delivery package'"
+                        className="input flex-1 text-sm"
+                      />
+                      <button
+                        onClick={() => {
+                          if (newOwlQuery.trim()) {
+                            const queries = settings.detection.owlv2_queries || []
+                            if (!queries.includes(newOwlQuery.trim())) {
+                              setSettings({
+                                ...settings,
+                                detection: {
+                                  ...settings.detection,
+                                  owlv2_queries: [...queries, newOwlQuery.trim()]
+                                }
+                              })
+                            }
+                            setNewOwlQuery('')
+                          }
+                        }}
+                        className="btn-primary text-sm px-4"
+                      >
+                        Add
+                      </button>
+                    </div>
+
+                    {/* Query list */}
+                    <div className="flex flex-wrap gap-2 max-h-48 overflow-y-auto">
+                      {(settings.detection.owlv2_queries || []).map((query, index) => (
+                        <div
+                          key={index}
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-purple-500/20 text-purple-300 border border-purple-500/30 text-sm"
+                        >
+                          <span>{query}</span>
+                          <button
+                            onClick={() => {
+                              const queries = settings.detection.owlv2_queries || []
+                              setSettings({
+                                ...settings,
+                                detection: {
+                                  ...settings.detection,
+                                  owlv2_queries: queries.filter((_, i) => i !== index)
+                                }
+                              })
+                            }}
+                            className="ml-1 text-purple-400 hover:text-red-400 transition-colors"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Quick add suggestions */}
+                    <div className="mt-3 pt-3 border-t border-white/10">
+                      <p className="text-xs text-gray-500 mb-2">Quick add:</p>
+                      <div className="flex flex-wrap gap-1">
+                        {['a person running', 'a fire or flames', 'a weapon', 'a package', 'a vehicle', 'smoke'].map(suggestion => (
+                          <button
+                            key={suggestion}
+                            onClick={() => {
+                              const queries = settings.detection.owlv2_queries || []
+                              if (!queries.includes(suggestion)) {
+                                setSettings({
+                                  ...settings,
+                                  detection: {
+                                    ...settings.detection,
+                                    owlv2_queries: [...queries, suggestion]
+                                  }
+                                })
+                              }
+                            }}
+                            disabled={(settings.detection.owlv2_queries || []).includes(suggestion)}
+                            className="text-xs px-2 py-1 rounded bg-white/5 text-gray-400 hover:bg-white/10 hover:text-gray-300 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                          >
+                            + {suggestion}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
                 )}
               </div>
             )}
@@ -960,7 +965,7 @@ export default function Settings() {
                       Using: {settings.vlm.provider === 'ollama' ? 'Ollama' : settings.vlm.provider === 'openai' ? 'OpenAI' : 'Gemini'}
                     </span>
                   </div>
-                  
+
                   {/* Toggle Buttons */}
                   <div className="flex rounded-xl bg-black/30 p-1">
                     {[
@@ -976,11 +981,10 @@ export default function Settings() {
                             vlm: { ...settings.vlm, provider: provider.id },
                           })
                         }
-                        className={`flex-1 py-3 px-4 rounded-lg text-center transition-all font-medium ${
-                          settings.vlm.provider === provider.id
+                        className={`flex-1 py-3 px-4 rounded-lg text-center transition-all font-medium ${settings.vlm.provider === provider.id
                             ? 'bg-primary-500 text-white shadow-lg'
                             : 'text-gray-400 hover:text-white hover:bg-white/10'
-                        }`}
+                          }`}
                       >
                         <span className="mr-2">{provider.icon}</span>
                         {provider.name}
@@ -1035,11 +1039,10 @@ export default function Settings() {
                                   vlm: { ...settings.vlm, model: model },
                                 })
                               }
-                              className={`p-3 rounded-xl text-left transition-all border ${
-                                settings.vlm.model === model
+                              className={`p-3 rounded-xl text-left transition-all border ${settings.vlm.model === model
                                   ? 'bg-primary-500/20 border-primary-500/50 text-primary-400'
                                   : 'bg-white/5 border-white/10 text-gray-300 hover:border-white/20 hover:bg-white/10'
-                              }`}
+                                }`}
                             >
                               <p className="font-medium truncate">{model.split(':')[0]}</p>
                               <p className="text-xs text-gray-500 mt-1">
@@ -1150,17 +1153,16 @@ export default function Settings() {
                                 vlm: { ...settings.vlm, openai_model: model },
                               })
                             }
-                            className={`p-3 rounded-xl text-left transition-all border ${
-                              settings.vlm.openai_model === model
+                            className={`p-3 rounded-xl text-left transition-all border ${settings.vlm.openai_model === model
                                 ? 'bg-primary-500/20 border-primary-500/50 text-primary-400'
                                 : 'bg-white/5 border-white/10 text-gray-300 hover:border-white/20 hover:bg-white/10'
-                            }`}
+                              }`}
                           >
                             <p className="font-medium truncate">{model}</p>
                             <p className="text-xs text-gray-500 mt-1">
-                              {model.includes('4o') || model.includes('vision') ? '👁️ Vision' : 
-                               model.includes('o1') || model.includes('o3') ? '🧠 Reasoning' : 
-                               model.includes('turbo') ? '⚡ Fast' : '💬 Chat'}
+                              {model.includes('4o') || model.includes('vision') ? '👁️ Vision' :
+                                model.includes('o1') || model.includes('o3') ? '🧠 Reasoning' :
+                                  model.includes('turbo') ? '⚡ Fast' : '💬 Chat'}
                             </p>
                           </button>
                         ))}
@@ -1229,18 +1231,17 @@ export default function Settings() {
                                 vlm: { ...settings.vlm, gemini_model: model },
                               })
                             }
-                            className={`p-3 rounded-xl text-left transition-all border ${
-                              settings.vlm.gemini_model === model
+                            className={`p-3 rounded-xl text-left transition-all border ${settings.vlm.gemini_model === model
                                 ? 'bg-primary-500/20 border-primary-500/50 text-primary-400'
                                 : 'bg-white/5 border-white/10 text-gray-300 hover:border-white/20 hover:bg-white/10'
-                            }`}
+                              }`}
                           >
                             <p className="font-medium truncate">{model.replace('gemini-', '').replace('models/', '')}</p>
                             <p className="text-xs text-gray-500 mt-1">
                               {model.includes('2.0') ? '🚀 Latest' :
-                               model.includes('flash') ? '⚡ Fast' : 
-                               model.includes('pro') ? '🎯 Advanced' : 
-                               model.includes('vision') ? '👁️ Vision' : '💬 Standard'}
+                                model.includes('flash') ? '⚡ Fast' :
+                                  model.includes('pro') ? '🎯 Advanced' :
+                                    model.includes('vision') ? '👁️ Vision' : '💬 Standard'}
                             </p>
                           </button>
                         ))}
@@ -1269,14 +1270,12 @@ export default function Settings() {
                         vlm: { ...settings.vlm, auto_summarize: !settings.vlm.auto_summarize },
                       })
                     }
-                    className={`relative w-14 h-7 rounded-full transition-colors ${
-                      settings.vlm.auto_summarize ? 'bg-primary-500' : 'bg-white/20'
-                    }`}
+                    className={`relative w-14 h-7 rounded-full transition-colors ${settings.vlm.auto_summarize ? 'bg-primary-500' : 'bg-white/20'
+                      }`}
                   >
                     <div
-                      className={`absolute top-1 w-5 h-5 rounded-full bg-white shadow-lg transition-transform ${
-                        settings.vlm.auto_summarize ? 'translate-x-8' : 'translate-x-1'
-                      }`}
+                      className={`absolute top-1 w-5 h-5 rounded-full bg-white shadow-lg transition-transform ${settings.vlm.auto_summarize ? 'translate-x-8' : 'translate-x-1'
+                        }`}
                     />
                   </button>
                 </div>
@@ -1319,7 +1318,7 @@ export default function Settings() {
             {activeTab === 'storage' && (
               <div className="space-y-6">
                 <h2 className="text-lg font-semibold text-white">Storage Settings</h2>
-                
+
                 <div className="grid grid-cols-2 gap-6">
                   <div>
                     <label className="block text-sm font-medium text-gray-400 mb-2">
@@ -1402,7 +1401,7 @@ export default function Settings() {
                     Notification Settings
                   </h2>
                 </div>
-                
+
                 {/* Master Toggle */}
                 <div className="flex items-center justify-between p-4 rounded-xl bg-gradient-to-r from-primary-500/10 to-cyan-500/10 border border-primary-500/20">
                   <div className="flex items-center gap-3">
@@ -1424,14 +1423,12 @@ export default function Settings() {
                         },
                       })
                     }
-                    className={`relative w-14 h-7 rounded-full transition-colors ${
-                      settings.notifications.enabled ? 'bg-primary-500' : 'bg-white/20'
-                    }`}
+                    className={`relative w-14 h-7 rounded-full transition-colors ${settings.notifications.enabled ? 'bg-primary-500' : 'bg-white/20'
+                      }`}
                   >
                     <div
-                      className={`absolute top-1 w-5 h-5 rounded-full bg-white shadow-lg transition-transform ${
-                        settings.notifications.enabled ? 'translate-x-8' : 'translate-x-1'
-                      }`}
+                      className={`absolute top-1 w-5 h-5 rounded-full bg-white shadow-lg transition-transform ${settings.notifications.enabled ? 'translate-x-8' : 'translate-x-1'
+                        }`}
                     />
                   </button>
                 </div>
@@ -1471,15 +1468,15 @@ export default function Settings() {
                     </label>
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-gray-500">
-                        {(settings.notifications.event_types || []).includes('all') 
-                          ? 'All events' 
+                        {(settings.notifications.event_types || []).includes('all')
+                          ? 'All events'
                           : `${settings.notifications.event_types?.length || 0} selected`}
                       </span>
                       <button
                         onClick={() => setSettings({
                           ...settings,
-                          notifications: { 
-                            ...settings.notifications, 
+                          notifications: {
+                            ...settings.notifications,
                             event_types: ['all']
                           }
                         })}
@@ -1505,7 +1502,7 @@ export default function Settings() {
                         onClick={() => {
                           const current = settings.notifications.event_types || []
                           let newTypes: string[]
-                          
+
                           if (event.id === 'all') {
                             // If clicking "All", set only "all"
                             newTypes = current.includes('all') ? [] : ['all']
@@ -1522,7 +1519,7 @@ export default function Settings() {
                               newTypes = [...current, event.id]
                             }
                           }
-                          
+
                           setSettings({
                             ...settings,
                             notifications: {
@@ -1531,13 +1528,12 @@ export default function Settings() {
                             },
                           })
                         }}
-                        className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                          (settings.notifications.event_types || []).includes(event.id)
+                        className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${(settings.notifications.event_types || []).includes(event.id)
                             ? event.id === 'all'
                               ? 'bg-primary-500/30 text-primary-300 border border-primary-500/50'
                               : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
                             : 'bg-white/5 text-gray-400 border border-white/10 hover:border-white/20'
-                        }`}
+                          }`}
                       >
                         {event.id === 'all' ? '🌐 ' : ''}{event.label}
                       </button>
@@ -1570,14 +1566,12 @@ export default function Settings() {
                           },
                         })
                       }
-                      className={`relative w-14 h-7 rounded-full transition-colors ${
-                        settings.notifications.telegram?.enabled ? 'bg-blue-500' : 'bg-white/20'
-                      }`}
+                      className={`relative w-14 h-7 rounded-full transition-colors ${settings.notifications.telegram?.enabled ? 'bg-blue-500' : 'bg-white/20'
+                        }`}
                     >
                       <div
-                        className={`absolute top-1 w-5 h-5 rounded-full bg-white shadow-lg transition-transform ${
-                          settings.notifications.telegram?.enabled ? 'translate-x-8' : 'translate-x-1'
-                        }`}
+                        className={`absolute top-1 w-5 h-5 rounded-full bg-white shadow-lg transition-transform ${settings.notifications.telegram?.enabled ? 'translate-x-8' : 'translate-x-1'
+                          }`}
                       />
                     </button>
                   </div>
@@ -1732,14 +1726,12 @@ export default function Settings() {
                           },
                         })
                       }
-                      className={`relative w-14 h-7 rounded-full transition-colors ${
-                        settings.notifications.email?.enabled ? 'bg-orange-500' : 'bg-white/20'
-                      }`}
+                      className={`relative w-14 h-7 rounded-full transition-colors ${settings.notifications.email?.enabled ? 'bg-orange-500' : 'bg-white/20'
+                        }`}
                     >
                       <div
-                        className={`absolute top-1 w-5 h-5 rounded-full bg-white shadow-lg transition-transform ${
-                          settings.notifications.email?.enabled ? 'translate-x-8' : 'translate-x-1'
-                        }`}
+                        className={`absolute top-1 w-5 h-5 rounded-full bg-white shadow-lg transition-transform ${settings.notifications.email?.enabled ? 'translate-x-8' : 'translate-x-1'
+                          }`}
                       />
                     </button>
                   </div>
@@ -1971,7 +1963,7 @@ export default function Settings() {
             {activeTab === 'security' && (
               <div className="space-y-6">
                 <h2 className="text-lg font-semibold text-white">Security Settings</h2>
-                
+
                 <div className="p-4 rounded-xl bg-yellow-500/10 border border-yellow-500/30">
                   <p className="text-yellow-400 font-medium">Security Configuration</p>
                   <p className="text-sm text-gray-400 mt-1">
