@@ -240,15 +240,27 @@ class OpenAIProvider(BaseLLMProvider):
         self._client = None
     
     async def _get_client(self) -> httpx.AsyncClient:
-        if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(
-                base_url=self.base_url,
-                timeout=60.0,
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json"
-                }
-            )
+        # Always create a fresh client to avoid stale connection issues
+        # This is especially important for OpenAI-compatible APIs like NVIDIA
+        if self._client and not self._client.is_closed:
+            try:
+                await self._client.aclose()
+            except Exception:
+                pass
+        
+        if not self.api_key:
+            logger.error("OpenAI API key is not set!")
+        
+        self._client = httpx.AsyncClient(
+            base_url=self.base_url,
+            timeout=120.0,  # Increased timeout for large vision models
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json"
+            },
+            http2=False  # Disable HTTP/2 for better compatibility
+        )
+        logger.debug(f"Created new OpenAI client: base_url={self.base_url}, model={self.model}")
         return self._client
     
     async def check_health(self) -> bool:
@@ -287,57 +299,85 @@ class OpenAIProvider(BaseLLMProvider):
         if not self.api_key:
             return "OpenAI API key not configured"
         
-        try:
-            client = await self._get_client()
-            image_base64 = self._frame_to_base64(frame)
-            
-            context = ""
-            if detected_objects:
-                objects_str = ", ".join([
-                    f"{obj['class_name']} ({obj['confidence']:.0%})"
-                    for obj in detected_objects
-                ])
-                context = f"Detected objects: {objects_str}. "
-            
-            if not prompt:
-                prompt = f"""Analyze this security camera frame. {context}
+        context = ""
+        if detected_objects:
+            objects_str = ", ".join([
+                f"{obj['class_name']} ({obj['confidence']:.0%})"
+                for obj in detected_objects
+            ])
+            context = f"Detected objects: {objects_str}. "
+        
+        if not prompt:
+            prompt = f"""Analyze this security camera frame. {context}
 
 Describe what you see in 2-3 simple sentences. Be factual and direct.
 Do not use markdown formatting, bullet points, or asterisks."""
-            
-            response = await client.post(
-                "/chat/completions",
-                json={
-                    "model": self.model,
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": prompt},
-                                {
-                                    "type": "image_url",
-                                    "image_url": {
-                                        "url": f"data:image/jpeg;base64,{image_base64}",
-                                        "detail": "low"
+        
+        # Retry logic for connection issues
+        max_retries = 3
+        retry_delay = 1.0
+        
+        for attempt in range(max_retries):
+            try:
+                client = await self._get_client()
+                image_base64 = self._frame_to_base64(frame)
+                
+                response = await client.post(
+                    "/chat/completions",
+                    json={
+                        "model": self.model,
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": [
+                                    {"type": "text", "text": prompt},
+                                    {
+                                        "type": "image_url",
+                                        "image_url": {
+                                            "url": f"data:image/jpeg;base64,{image_base64}",
+                                            "detail": "low"
+                                        }
                                     }
-                                }
-                            ]
-                        }
-                    ],
-                    "max_tokens": 300,
-                    "temperature": 0.2
-                },
-                timeout=90.0
-            )
-            
-            if response.status_code == 200:
-                return response.json()["choices"][0]["message"]["content"].strip()
-            else:
-                logger.error(f"OpenAI VLM API error: {response.status_code} - {response.text}")
-                return "Failed to generate description"
-        except Exception as e:
-            logger.error(f"OpenAI frame description error: {e}")
-            return f"Error: {str(e)}"
+                                ]
+                            }
+                        ],
+                        "max_tokens": 300,
+                        "temperature": 0.2
+                    },
+                    timeout=120.0
+                )
+                
+                if response.status_code == 200:
+                    return response.json()["choices"][0]["message"]["content"].strip()
+                else:
+                    logger.error(f"OpenAI VLM API error: {response.status_code} - {response.text}")
+                    return "Failed to generate description"
+                    
+            except (httpx.ReadError, httpx.ConnectError) as e:
+                if attempt < max_retries - 1:
+                    logger.warning(f"OpenAI connection error (attempt {attempt + 1}/{max_retries}), retrying in {retry_delay}s: {e}")
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 2  # Exponential backoff
+                    # Create fresh client on retry
+                    if self._client:
+                        await self._client.aclose()
+                        self._client = None
+                else:
+                    logger.error(f"OpenAI frame description read error after {max_retries} retries: {type(e).__name__}: {e}")
+                    return f"VLM Error: Connection failed after {max_retries} retries - check network"
+            except httpx.TimeoutException as e:
+                if attempt < max_retries - 1:
+                    logger.warning(f"OpenAI timeout (attempt {attempt + 1}/{max_retries}), retrying: {e}")
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 2
+                else:
+                    logger.error(f"OpenAI frame description timeout after {max_retries} retries: {type(e).__name__}: {e}")
+                    return "VLM Error: Request timed out after retries - try a smaller model"
+            except Exception as e:
+                logger.error(f"OpenAI frame description error: {type(e).__name__}: {e}")
+                return f"VLM Error: {type(e).__name__} - {str(e) or 'Connection failed'}"
+        
+        return "VLM Error: Request failed"
     
     async def chat(
         self,
@@ -349,40 +389,65 @@ Do not use markdown formatting, bullet points, or asterisks."""
         if not self.api_key:
             return "OpenAI API key not configured"
         
-        try:
-            client = await self._get_client()
-            messages = []
-            
-            system_prompt = self._build_system_prompt(context, has_images)
-            messages.append({"role": "system", "content": system_prompt})
-            
-            if history:
-                messages.extend(history)
-            messages.append({"role": "user", "content": message})
-            
-            response = await client.post(
-                "/chat/completions",
-                json={
-                    "model": self.model,
-                    "messages": messages,
-                    "max_tokens": 500,
-                    "temperature": 0.7
-                },
-                timeout=60.0
-            )
-            
-            if response.status_code == 200:
-                return response.json()["choices"][0]["message"]["content"].strip()
-            else:
-                error_detail = response.text[:200] if response.text else "Unknown error"
-                logger.error(f"OpenAI Chat API error: {response.status_code} - {error_detail}")
-                return f"VLM Error: API returned status {response.status_code}. Please check your VLM settings."
-        except httpx.TimeoutException:
-            logger.error("OpenAI chat timeout")
-            return "VLM request timed out. Please try again."
-        except Exception as e:
-            logger.error(f"OpenAI chat error: {type(e).__name__}: {e}")
-            return f"VLM Error: {type(e).__name__} - {str(e) or 'Connection failed'}"
+        # Retry logic for connection issues
+        max_retries = 3
+        retry_delay = 1.0
+        
+        for attempt in range(max_retries):
+            try:
+                client = await self._get_client()
+                messages = []
+                
+                system_prompt = self._build_system_prompt(context, has_images)
+                messages.append({"role": "system", "content": system_prompt})
+                
+                if history:
+                    messages.extend(history)
+                messages.append({"role": "user", "content": message})
+                
+                response = await client.post(
+                    "/chat/completions",
+                    json={
+                        "model": self.model,
+                        "messages": messages,
+                        "max_tokens": 500,
+                        "temperature": 0.7
+                    },
+                    timeout=60.0
+                )
+                
+                if response.status_code == 200:
+                    return response.json()["choices"][0]["message"]["content"].strip()
+                else:
+                    error_detail = response.text[:200] if response.text else "Unknown error"
+                    logger.error(f"OpenAI Chat API error: {response.status_code} - {error_detail}")
+                    return f"VLM Error: API returned status {response.status_code}. Please check your VLM settings."
+                    
+            except (httpx.ReadError, httpx.ConnectError) as e:
+                if attempt < max_retries - 1:
+                    logger.warning(f"OpenAI chat connection error (attempt {attempt + 1}/{max_retries}), retrying in {retry_delay}s: {e}")
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 2  # Exponential backoff
+                    # Create fresh client on retry
+                    if self._client:
+                        await self._client.aclose()
+                        self._client = None
+                else:
+                    logger.error(f"OpenAI chat error after {max_retries} retries: {type(e).__name__}: {e}")
+                    return f"VLM Error: Connection failed after {max_retries} retries - check network"
+            except httpx.TimeoutException as e:
+                if attempt < max_retries - 1:
+                    logger.warning(f"OpenAI chat timeout (attempt {attempt + 1}/{max_retries}), retrying: {e}")
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 2
+                else:
+                    logger.error(f"OpenAI chat timeout after {max_retries} retries")
+                    return "VLM request timed out after retries. Please try again."
+            except Exception as e:
+                logger.error(f"OpenAI chat error: {type(e).__name__}: {e}")
+                return f"VLM Error: {type(e).__name__} - {str(e) or 'Connection failed'}"
+        
+        return "VLM Error: Request failed"
     
     def _build_system_prompt(self, context: Optional[str], has_images: bool) -> str:
         system_prompt = """You are Chowkidaar AI, an intelligent security assistant for a surveillance system.
