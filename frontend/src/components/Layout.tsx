@@ -13,6 +13,7 @@ import {
   Bars3Icon,
   XMarkIcon,
   ChartBarSquareIcon,
+  SparklesIcon,
 } from '@heroicons/react/24/outline'
 import { useAuthStore } from '../store/authStore'
 import clsx from 'clsx'
@@ -23,6 +24,7 @@ const navigation = [
   { name: 'Events', href: '/events', icon: BellAlertIcon },
   { name: 'Monitor', href: '/monitor', icon: CpuChipIcon },
   { name: 'Heatmap', href: '/heatmap', icon: ChartBarSquareIcon },
+  { name: 'Insights', href: '/insights', icon: SparklesIcon },
   { name: 'Assistant', href: '/assistant', icon: ChatBubbleLeftRightIcon },
   { name: 'Settings', href: '/settings', icon: Cog6ToothIcon },
   { name: 'Admin', href: '/admin', icon: UserGroupIcon },

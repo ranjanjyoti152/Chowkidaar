@@ -435,3 +435,76 @@ export const settingsApi = {
     return response.data
   },
 }
+
+// Embeddings API for visualization
+export interface EmbeddingNode {
+  id: number
+  x: number
+  y: number
+  event_type: string
+  severity: string
+  timestamp: string
+  summary: string
+  camera_id: number
+  camera_name: string
+  thumbnail_path: string | null
+  detected_objects: unknown[]
+  cluster: number
+}
+
+export interface EmbeddingLink {
+  source: number
+  target: number
+  value: number
+}
+
+export interface EmbeddingCluster {
+  id: number
+  size: number
+  dominant_type: string
+  event_ids: number[]
+}
+
+export interface EmbeddingGraphData {
+  nodes: EmbeddingNode[]
+  links: EmbeddingLink[]
+  clusters: EmbeddingCluster[]
+  total_events?: number
+}
+
+export const embeddingsApi = {
+  getGraph: async (params?: { days?: number; camera_id?: number; event_type?: string; limit?: number }): Promise<EmbeddingGraphData> => {
+    const response = await api.get('/embeddings/graph', { params })
+    return response.data
+  },
+
+  getStats: async (): Promise<{
+    total_indexed: number
+    embedding_dimension: number
+    model: string
+    event_type_distribution: Record<string, number>
+    camera_distribution: Record<string, number>
+    is_available: boolean
+  }> => {
+    const response = await api.get('/embeddings/stats')
+    return response.data
+  },
+
+  getSimilar: async (eventId: number, limit?: number): Promise<{
+    source_event: { id: number; summary?: string; event_type?: string }
+    similar_events: Array<{
+      id: number
+      event_type: string
+      severity: string
+      timestamp: string
+      summary: string
+      camera_name: string
+      thumbnail_path: string | null
+      similarity_score: number
+    }>
+  }> => {
+    const response = await api.get(`/embeddings/similar/${eventId}`, { params: { limit } })
+    return response.data
+  },
+}
+

@@ -10,6 +10,7 @@ import Assistant from './pages/Assistant'
 import Settings from './pages/Settings'
 import Admin from './pages/Admin'
 import Heatmap from './pages/Heatmap'
+import Insights from './pages/Insights'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuthStore()
@@ -38,6 +39,7 @@ function App() {
         <Route path="events" element={<Events />} />
         <Route path="monitor" element={<Monitor />} />
         <Route path="heatmap" element={<Heatmap />} />
+        <Route path="insights" element={<Insights />} />
         <Route path="assistant" element={<Assistant />} />
         <Route path="settings" element={<Settings />} />
         <Route path="admin" element={<Admin />} />
