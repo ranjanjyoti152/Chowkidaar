@@ -3,14 +3,12 @@ Chowkidaar NVR - System Monitoring Routes
 """
 from typing import List
 from pathlib import Path
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from loguru import logger
-import shutil
-import os
 
-from app.core.database import get_db, async_engine
+from app.core.database import get_db
 from app.core.config import settings
 from app.models.user import User
 from app.models.camera import Camera
@@ -18,9 +16,7 @@ from app.schemas.system import SystemStats, SystemHealth, InferenceStats
 from app.api.deps import get_current_user, require_admin
 from app.services.system_monitor import get_system_monitor
 from app.services.stream_handler import get_stream_manager
-from app.services.yolo_detector import get_detector
-from app.services.vlm_service import get_unified_vlm_service
-from app.services.owlv2_detector import OWLv2Detector, get_owlv2_detector
+from app.services.vjepa2_service import get_vjepa2_service, VJEPA2Service
 
 router = APIRouter(prefix="/system", tags=["System"])
 
@@ -45,13 +41,19 @@ async def get_system_stats(
     )
     total_cameras = result.scalar() or 0
     
-    # Get inference stats if available
+    # Get inference stats from V-JEPA 2
     inference_stats = None
     try:
-        detector = await get_detector()
-        stats = detector.get_stats()
-        if stats["inference_count"] > 0:
-            inference_stats = InferenceStats(**stats)
+        vjepa2 = await get_vjepa2_service()
+        stats = vjepa2.get_stats()
+        if stats.get("inference_count", 0) > 0:
+            inference_stats = InferenceStats(
+                model=stats.get("model", "vjepa2"),
+                device=stats.get("device", "cuda"),
+                inference_count=stats.get("inference_count", 0),
+                average_inference_time=stats.get("average_inference_time_ms", 0),
+                last_inference_time=stats.get("last_inference_time_ms", 0)
+            )
     except:
         pass
     
@@ -77,17 +79,17 @@ async def get_system_health(
     except:
         db_healthy = False
     
-    # Check VLM service (unified)
-    vlm_healthy = False
+    # Check V-JEPA 2 service
+    vjepa2_healthy = False
     try:
-        vlm_service = get_unified_vlm_service()
-        vlm_healthy = await vlm_service.check_health()
+        vjepa2 = await get_vjepa2_service()
+        vjepa2_healthy = vjepa2.initialized
     except:
         pass
     
     return await monitor.check_health(
         db_healthy=db_healthy,
-        ollama_healthy=vlm_healthy
+        ollama_healthy=vjepa2_healthy  # Reusing field for V-JEPA 2
     )
 
 
@@ -132,283 +134,9 @@ async def get_active_streams(
 async def get_available_models(
     current_user: User = Depends(get_current_user)
 ):
-    """Get list of available models from unified VLM service"""
-    try:
-        vlm_service = get_unified_vlm_service()
-        models = await vlm_service.list_models()
-        return {"models": models}
-    except Exception as e:
-        return {"models": [], "error": str(e)}
-
-
-@router.post("/ollama/test")
-async def test_ollama_connection(
-    current_user: User = Depends(get_current_user),
-    url: str = None
-):
-    """Test Ollama connection and get available models"""
-    import httpx
-    
-    test_url = url or settings.ollama_base_url
-    
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(f"{test_url}/api/tags")
-            if response.status_code == 200:
-                data = response.json()
-                models = [m["name"] for m in data.get("models", [])]
-                return {
-                    "status": "online",
-                    "url": test_url,
-                    "models": models,
-                    "model_count": len(models)
-                }
-            else:
-                return {
-                    "status": "error",
-                    "url": test_url,
-                    "models": [],
-                    "error": f"HTTP {response.status_code}"
-                }
-    except Exception as e:
-        return {
-            "status": "offline",
-            "url": test_url,
-            "models": [],
-            "error": str(e)
-        }
-
-
-@router.post("/ollama/pull")
-async def pull_ollama_model(
-    current_user: User = Depends(get_current_user),
-    model_name: str = None,
-    url: str = None
-):
-    """
-    Pull/download an Ollama model (non-streaming fallback).
-    Use /ollama/pull-stream for progress updates.
-    """
-    import httpx
-    
-    if not model_name:
-        raise HTTPException(status_code=400, detail="model_name is required")
-    
-    pull_url = url or settings.ollama_base_url
-    
-    try:
-        async with httpx.AsyncClient(timeout=600.0) as client:
-            response = await client.post(
-                f"{pull_url}/api/pull",
-                json={"name": model_name, "stream": False}
-            )
-            
-            if response.status_code == 200:
-                models_response = await client.get(f"{pull_url}/api/tags")
-                models = []
-                if models_response.status_code == 200:
-                    data = models_response.json()
-                    models = [m["name"] for m in data.get("models", [])]
-                
-                return {
-                    "status": "success",
-                    "message": f"Model '{model_name}' downloaded successfully",
-                    "model": model_name,
-                    "models": models
-                }
-            else:
-                error_text = response.text[:500] if response.text else "Unknown error"
-                return {
-                    "status": "error",
-                    "message": f"Failed to pull model: {error_text}",
-                    "model": model_name
-                }
-                
-    except httpx.TimeoutException:
-        return {
-            "status": "timeout",
-            "message": f"Model download timed out.",
-            "model": model_name
-        }
-    except httpx.ConnectError:
-        return {
-            "status": "offline",
-            "message": f"Cannot connect to Ollama at {pull_url}.",
-            "model": model_name
-        }
-    except Exception as e:
-        logger.error(f"Ollama pull error: {e}")
-        return {"status": "error", "message": str(e), "model": model_name}
-
-
-@router.get("/ollama/pull-stream")
-async def pull_ollama_model_stream(
-    model_name: str,
-    url: str = None,
-    current_user: User = Depends(get_current_user)
-):
-    """
-    Pull/download an Ollama model with streaming progress via Server-Sent Events.
-    Returns real-time download progress updates.
-    """
-    import httpx
-    import json
-    from fastapi.responses import StreamingResponse
-    
-    if not model_name:
-        raise HTTPException(status_code=400, detail="model_name is required")
-    
-    pull_url = url or settings.ollama_base_url
-    
-    async def generate_progress():
-        try:
-            async with httpx.AsyncClient(timeout=600.0) as client:
-                async with client.stream(
-                    "POST",
-                    f"{pull_url}/api/pull",
-                    json={"name": model_name, "stream": True},
-                    timeout=600.0
-                ) as response:
-                    if response.status_code != 200:
-                        yield f"data: {json.dumps({'status': 'error', 'message': 'Failed to connect to Ollama'})}\n\n"
-                        return
-                    
-                    async for line in response.aiter_lines():
-                        if not line:
-                            continue
-                        
-                        try:
-                            data = json.loads(line)
-                            
-                            # Parse Ollama progress format
-                            status = data.get("status", "")
-                            completed = data.get("completed", 0)
-                            total = data.get("total", 0)
-                            digest = data.get("digest", "")
-                            
-                            # Calculate progress percentage
-                            if total > 0:
-                                percent = round((completed / total) * 100, 1)
-                            else:
-                                percent = 0
-                            
-                            progress_data = {
-                                "status": status,
-                                "percent": percent,
-                                "completed": completed,
-                                "total": total,
-                                "digest": digest[:12] if digest else ""
-                            }
-                            
-                            yield f"data: {json.dumps(progress_data)}\n\n"
-                            
-                            # Check if download is complete
-                            if status == "success" or (status == "" and completed == total and total > 0):
-                                # Fetch updated model list
-                                models_response = await client.get(f"{pull_url}/api/tags")
-                                models = []
-                                if models_response.status_code == 200:
-                                    models_data = models_response.json()
-                                    models = [m["name"] for m in models_data.get("models", [])]
-                                
-                                yield f"data: {json.dumps({'status': 'complete', 'message': 'Download complete', 'models': models})}\n\n"
-                                
-                        except json.JSONDecodeError:
-                            continue
-                            
-        except httpx.ConnectError:
-            yield f"data: {json.dumps({'status': 'error', 'message': 'Cannot connect to Ollama'})}\n\n"
-        except httpx.TimeoutException:
-            yield f"data: {json.dumps({'status': 'error', 'message': 'Download timed out'})}\n\n"
-        except Exception as e:
-            logger.error(f"Ollama pull stream error: {e}")
-            yield f"data: {json.dumps({'status': 'error', 'message': str(e)})}\n\n"
-    
-    return StreamingResponse(
-        generate_progress(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"
-        }
-    )
-
-
-@router.delete("/ollama/model/{model_name}")
-async def delete_ollama_model(
-    model_name: str,
-    current_user: User = Depends(require_admin),
-    url: str = None
-):
-    """Delete an Ollama model from the server."""
-    import httpx
-    
-    delete_url = url or settings.ollama_base_url
-    
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.delete(
-                f"{delete_url}/api/delete",
-                json={"name": model_name}
-            )
-            
-            if response.status_code == 200:
-                return {
-                    "status": "success",
-                    "message": f"Model '{model_name}' deleted successfully"
-                }
-            else:
-                raise HTTPException(
-                    status_code=response.status_code,
-                    detail=f"Failed to delete model: {response.text}"
-                )
-    except httpx.ConnectError:
-        raise HTTPException(
-            status_code=503,
-            detail=f"Cannot connect to Ollama at {delete_url}"
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=str(e)
-        )
-
-
-@router.post("/llm/test")
-async def test_llm_provider(
-    current_user: User = Depends(get_current_user),
-    provider: str = "ollama",
-    url: str = None,
-    api_key: str = None,
-    model: str = None
-):
-    """Test any LLM provider connection (Ollama, OpenAI, Gemini)"""
-    from loguru import logger
-    logger.info(f"Testing LLM provider: {provider}, api_key present: {bool(api_key)}, url: {url}")
-    try:
-        vlm_service = get_unified_vlm_service()
-        result = await vlm_service.test_provider(
-            provider=provider,
-            ollama_url=url,
-            model=model,
-            openai_api_key=api_key if provider == "openai" else None,
-            openai_model=model if provider == "openai" else None,
-            openai_base_url=url if provider == "openai" else None,
-            gemini_api_key=api_key if provider == "gemini" else None,
-            gemini_model=model if provider == "gemini" else None
-        )
-        logger.info(f"Test result: {result}")
-        result["provider"] = provider
-        return result
-    except Exception as e:
-        logger.error(f"LLM test error: {e}")
-        return {
-            "status": "error",
-            "provider": provider,
-            "models": [],
-            "error": str(e)
-        }
+    """Get list of available V-JEPA 2 models"""
+    models = list(VJEPA2Service.AVAILABLE_MODELS.keys())
+    return {"models": models, "type": "vjepa2"}
 
 
 @router.get("/info")
@@ -418,7 +146,9 @@ async def get_system_info(
     """Get system information (admin only)"""
     import platform
     import sys
-    from app.core.config import settings
+    
+    # Get V-JEPA 2 status
+    vjepa2 = await get_vjepa2_service()
     
     return {
         "app_name": settings.app_name,
@@ -426,9 +156,10 @@ async def get_system_info(
         "python_version": sys.version,
         "platform": platform.platform(),
         "processor": platform.processor(),
-        "yolo_model": settings.yolo_model_path,
-        "vlm_model": settings.ollama_vlm_model,
-        "chat_model": settings.ollama_chat_model,
+        "detection_model": "V-JEPA 2",
+        "vjepa2_model": vjepa2.model_name if vjepa2.initialized else None,
+        "vjepa2_device": vjepa2.device,
+        "vjepa2_initialized": vjepa2.initialized,
         "max_streams": settings.max_concurrent_streams
     }
 
@@ -437,20 +168,20 @@ async def get_system_info(
 async def restart_detector(
     current_user: User = Depends(require_admin)
 ):
-    """Restart the YOLO detector and all detection loops (admin only)"""
+    """Restart the V-JEPA 2 detector and all detection loops (admin only)"""
     try:
-        from app.services.yolo_detector import detector
         from app.services.detection_service import get_detection_service
         
-        # Restart the detector
-        await detector.shutdown()
-        await detector.initialize()
+        # Get V-JEPA 2 service and reinitialize
+        vjepa2 = await get_vjepa2_service()
+        await vjepa2.shutdown()
+        await vjepa2.initialize()
         
-        # Restart all detection loops to pick up new model from settings
+        # Restart all detection loops
         detection_service = await get_detection_service()
         await detection_service.restart_all_detection_loops()
         
-        return {"message": "Detector and all detection loops restarted successfully"}
+        return {"message": "V-JEPA 2 detector and all detection loops restarted successfully"}
     except Exception as e:
         raise HTTPException(
             status_code=500,
@@ -474,351 +205,132 @@ async def clear_all_streams(
         )
 
 
-@router.get("/yolo-models")
-async def list_yolo_models(
+@router.get("/vjepa2-models")
+async def list_vjepa2_models(
     current_user: User = Depends(get_current_user)
 ):
-    """List available detection models (YOLO and OWLv2)"""
+    """List available V-JEPA 2 models"""
     models = []
     
-    # Built-in YOLO models
-    builtin_models = [
-        {"name": "yolov8n", "display_name": "YOLOv8n (Nano - Fast)", "type": "builtin", "size": "6 MB", "category": "yolo"},
-        {"name": "yolov8s", "display_name": "YOLOv8s (Small)", "type": "builtin", "size": "22 MB", "category": "yolo"},
-        {"name": "yolov8m", "display_name": "YOLOv8m (Medium)", "type": "builtin", "size": "52 MB", "category": "yolo"},
-        {"name": "yolov8l", "display_name": "YOLOv8l (Large)", "type": "builtin", "size": "87 MB", "category": "yolo"},
-        {"name": "yolov8x", "display_name": "YOLOv8x (XLarge)", "type": "builtin", "size": "137 MB", "category": "yolo"},
-    ]
-    models.extend(builtin_models)
-    
-    # OWLv2 Open-Vocabulary Detection models
-    owlv2_models = [
-        {"name": "owlv2-base", "display_name": "OWLv2 Base (Open-Vocab)", "type": "builtin", "size": "~600 MB", "category": "owlv2", "description": "Open-vocabulary detection - detect any object by text description"},
-        {"name": "owlv2-large", "display_name": "OWLv2 Large (Open-Vocab)", "type": "builtin", "size": "~1.2 GB", "category": "owlv2", "description": "Larger model for better accuracy on custom queries"},
-    ]
-    models.extend(owlv2_models)
-    
-    # Custom models from models directory
-    if MODELS_DIR.exists():
-        for model_file in MODELS_DIR.glob("*.pt"):
-            size_mb = model_file.stat().st_size / (1024 * 1024)
-            models.append({
-                "name": model_file.stem,
-                "display_name": f"{model_file.stem} (Custom)",
-                "type": "custom",
-                "size": f"{size_mb:.1f} MB",
-                "path": str(model_file)
-            })
+    for name, model_id in VJEPA2Service.AVAILABLE_MODELS.items():
+        # Estimate sizes
+        if "large" in name:
+            size = "~2 GB"
+        elif "huge" in name:
+            size = "~4 GB"
+        elif "giant" in name:
+            size = "~8 GB"
+        else:
+            size = "~2 GB"
+            
+        models.append({
+            "name": name,
+            "display_name": f"V-JEPA 2 {name.replace('vjepa2-', '').title()}",
+            "model_id": model_id,
+            "type": "vjepa2",
+            "size": size,
+            "description": "Self-supervised video understanding model"
+        })
     
     return {"models": models}
 
 
-@router.get("/owlv2-status")
-async def get_owlv2_model_status(
+@router.get("/vjepa2-status")
+async def get_vjepa2_status(
     current_user: User = Depends(get_current_user)
 ):
-    """Check OWLv2 model download status"""
+    """Get V-JEPA 2 model status"""
     from pathlib import Path
+    
+    vjepa2 = await get_vjepa2_service()
+    stats = vjepa2.get_stats()
     
     cache_dir = Path.home() / ".cache" / "huggingface" / "hub"
     
     models_status = {}
-    for model_name, model_id in OWLv2Detector.AVAILABLE_MODELS.items():
+    for model_name, model_id in VJEPA2Service.AVAILABLE_MODELS.items():
         model_cache_name = f"models--{model_id.replace('/', '--')}"
         is_cached = (cache_dir / model_cache_name).exists()
-        
-        # Estimate size
-        size = "~600 MB" if "base" in model_name else "~1.2 GB"
         
         models_status[model_name] = {
             "model_id": model_id,
             "cached": is_cached,
-            "size": size,
-            "cache_path": str(cache_dir / model_cache_name) if is_cached else None
+            "active": vjepa2.model_name == model_name and vjepa2.initialized
         }
     
     return {
+        "initialized": vjepa2.initialized,
+        "current_model": vjepa2.model_name,
+        "device": vjepa2.device,
+        "stats": stats,
         "models": models_status,
         "cache_directory": str(cache_dir)
     }
 
 
-@router.get("/detector-status")
-async def get_detector_status(
-    current_user: User = Depends(get_current_user)
-):
-    """Get status of all detectors - shows which one is active"""
-    try:
-        yolo = await get_detector()
-        owlv2 = await get_owlv2_detector()
-        
-        yolo_active = yolo._initialized if hasattr(yolo, '_initialized') else False
-        owlv2_active = owlv2._initialized if hasattr(owlv2, '_initialized') else False
-        
-        # Determine active detector
-        active_detector = None
-        if owlv2_active:
-            active_detector = "owlv2"
-        elif yolo_active:
-            active_detector = "yolo"
-        
-        return {
-            "active_detector": active_detector,
-            "yolo": {
-                "initialized": yolo_active,
-                "model": getattr(yolo, '_model_path', None) if yolo_active else None
-            },
-            "owlv2": {
-                "initialized": owlv2_active,
-                "model": owlv2._current_model_name if owlv2_active else None,
-                "queries": owlv2.get_active_queries() if owlv2_active else []
-            }
-        }
-    except Exception as e:
-        logger.error(f"Error getting detector status: {e}")
-        return {
-            "active_detector": None,
-            "error": str(e)
-        }
-
-
-@router.post("/owlv2-download/{model_name}")
-async def download_owlv2_model(
+@router.post("/vjepa2-download/{model_name}")
+async def download_vjepa2_model(
     model_name: str,
     current_user: User = Depends(require_admin)
 ):
-    """Download/pre-cache an OWLv2 model"""
-    if model_name not in OWLv2Detector.AVAILABLE_MODELS:
+    """Download/pre-cache a V-JEPA 2 model"""
+    if model_name not in VJEPA2Service.AVAILABLE_MODELS:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid model name. Available: {list(OWLv2Detector.AVAILABLE_MODELS.keys())}"
+            detail=f"Invalid model name. Available: {list(VJEPA2Service.AVAILABLE_MODELS.keys())}"
         )
     
     try:
-        success = await OWLv2Detector.preload_model(model_name)
+        success = await VJEPA2Service.preload_model(model_name)
         if success:
-            return {"status": "success", "message": f"OWLv2 model '{model_name}' downloaded successfully"}
+            return {"status": "success", "message": f"V-JEPA 2 model '{model_name}' downloaded successfully"}
         else:
             raise HTTPException(status_code=500, detail="Failed to download model")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/yolo-models/upload")
-async def upload_yolo_model(
-    file: UploadFile = File(...),
-    name: str = Form(None),
-    current_user: User = Depends(require_admin)
-):
-    """Upload a custom YOLO model (.pt file)"""
-    if not file.filename.endswith('.pt'):
-        raise HTTPException(
-            status_code=400,
-            detail="Only .pt files are allowed"
-        )
-    
-    # Use provided name or filename
-    model_name = name or file.filename.replace('.pt', '')
-    model_path = MODELS_DIR / f"{model_name}.pt"
-    
-    # Check if already exists
-    if model_path.exists():
-        raise HTTPException(
-            status_code=400,
-            detail=f"Model '{model_name}' already exists"
-        )
-    
-    # Save file
-    try:
-        with open(model_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-        
-        size_mb = model_path.stat().st_size / (1024 * 1024)
-        
-        return {
-            "message": "Model uploaded successfully",
-            "model": {
-                "name": model_name,
-                "display_name": f"{model_name} (Custom)",
-                "type": "custom",
-                "size": f"{size_mb:.1f} MB",
-                "path": str(model_path)
-            }
-        }
-    except Exception as e:
-        if model_path.exists():
-            model_path.unlink()
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to save model: {str(e)}"
-        )
-
-
-@router.delete("/yolo-models/{model_name}")
-async def delete_yolo_model(
+@router.post("/vjepa2-models/{model_name}/activate")
+async def activate_vjepa2_model(
     model_name: str,
     current_user: User = Depends(require_admin)
 ):
-    """Delete a custom YOLO model"""
-    model_path = MODELS_DIR / f"{model_name}.pt"
-    
-    if not model_path.exists():
+    """Activate/switch to a V-JEPA 2 model"""
+    if model_name not in VJEPA2Service.AVAILABLE_MODELS:
         raise HTTPException(
-            status_code=404,
-            detail=f"Model '{model_name}' not found"
+            status_code=400,
+            detail=f"Invalid model name. Available: {list(VJEPA2Service.AVAILABLE_MODELS.keys())}"
         )
     
     try:
-        model_path.unlink()
-        return {"message": f"Model '{model_name}' deleted successfully"}
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to delete model: {str(e)}"
-        )
-
-
-@router.get("/yolo-models/{model_name}/classes")
-async def get_model_classes(
-    model_name: str,
-    current_user: User = Depends(get_current_user)
-):
-    """Get classes for a YOLO model or queries for OWLv2"""
-    try:
-        # OWLv2 returns active queries instead of fixed classes
-        if model_name.startswith("owlv2"):
-            from app.services.owlv2_detector import get_owlv2_detector
-            
-            owlv2 = await get_owlv2_detector()
-            queries = owlv2.get_active_queries()
+        vjepa2 = await get_vjepa2_service()
+        
+        # Shutdown current model if initialized
+        if vjepa2.initialized:
+            await vjepa2.shutdown()
+        
+        # Initialize with new model
+        success = await vjepa2.initialize(model_name=model_name)
+        
+        if success:
+            # Restart all detection loops
+            from app.services.detection_service import get_detection_service
+            detection_service = await get_detection_service()
+            await detection_service.restart_all_detection_loops()
             
             return {
+                "message": f"V-JEPA 2 model '{model_name}' activated successfully",
                 "model": model_name,
-                "classes": queries,  # For UI compatibility
-                "queries": queries,
-                "class_count": len(queries),
-                "type": "owlv2",
-                "note": "OWLv2 uses text queries for open-vocabulary detection. You can customize these in settings."
+                "device": vjepa2.device
             }
-        
-        # YOLO model classes
-        from ultralytics import YOLO
-        
-        # Determine model path
-        if model_name.startswith("yolov8"):
-            model_path = f"{model_name}.pt"
         else:
-            model_path = MODELS_DIR / f"{model_name}.pt"
-            if not model_path.exists():
-                raise HTTPException(status_code=404, detail=f"Model '{model_name}' not found")
-            model_path = str(model_path)
-        
-        # Load model and get classes
-        model = YOLO(model_path)
-        classes = model.names  # dict {0: 'person', 1: 'bicycle', ...}
-        
-        return {
-            "model": model_name,
-            "classes": list(classes.values()),
-            "class_count": len(classes),
-            "type": "yolo"
-        }
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to initialize V-JEPA 2 model '{model_name}'"
+            )
     except Exception as e:
+        logger.error(f"Error activating V-JEPA 2 model: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to load model classes: {str(e)}"
-        )
-
-
-@router.post("/yolo-models/{model_name}/activate")
-async def activate_yolo_model(
-    model_name: str,
-    current_user: User = Depends(require_admin)
-):
-    """Activate/switch to a YOLO or OWLv2 model - only one can be active at a time"""
-    try:
-        # Check if it's an OWLv2 model
-        if model_name.startswith("owlv2"):
-            from app.services.owlv2_detector import get_owlv2_detector
-            from app.services.yolo_detector import get_detector
-            
-            # First, deactivate YOLO detector
-            try:
-                yolo = await get_detector()
-                if yolo._initialized:
-                    await yolo.shutdown()
-                    logger.info("🔴 YOLO detector deactivated (switching to OWLv2)")
-            except Exception as e:
-                logger.warning(f"Could not deactivate YOLO: {e}")
-            
-            # Now activate OWLv2
-            owlv2 = await get_owlv2_detector()
-            success = await owlv2.initialize(model_name=model_name)
-            
-            if success:
-                # Restart all detection loops to use the new model
-                from app.services.detection_service import get_detection_service
-                detection_service = await get_detection_service()
-                await detection_service.restart_all_detection_loops()
-                
-                return {
-                    "message": f"OWLv2 model '{model_name}' activated successfully. YOLO deactivated.",
-                    "model": model_name,
-                    "type": "owlv2",
-                    "yolo_status": "deactivated"
-                }
-            else:
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Failed to initialize OWLv2 model '{model_name}'"
-                )
-        
-        # YOLO model activation - deactivate OWLv2 first
-        from app.services.yolo_detector import get_detector
-        from app.services.owlv2_detector import get_owlv2_detector
-        
-        # Deactivate OWLv2 if active
-        try:
-            owlv2 = await get_owlv2_detector()
-            if owlv2._initialized:
-                owlv2._initialized = False
-                owlv2.model = None
-                owlv2.processor = None
-                logger.info("🔴 OWLv2 detector deactivated (switching to YOLO)")
-        except Exception as e:
-            logger.warning(f"Could not deactivate OWLv2: {e}")
-        
-        detector = await get_detector()
-        
-        # Determine model path
-        if model_name.startswith("yolov8"):
-            model_path = f"{model_name}.pt"
-        else:
-            model_path = MODELS_DIR / f"{model_name}.pt"
-            if not model_path.exists():
-                raise HTTPException(status_code=404, detail=f"Model '{model_name}' not found")
-            model_path = str(model_path)
-        
-        # Reload detector with new model
-        await detector.shutdown()
-        detector.model_path = model_path  # Fixed: was _model_path
-        await detector.initialize()
-        
-        # Restart all detection loops to use the new model
-        from app.services.detection_service import get_detection_service
-        detection_service = await get_detection_service()
-        await detection_service.restart_all_detection_loops()
-        
-        return {
-            "message": f"YOLO model '{model_name}' activated successfully. OWLv2 deactivated.",
-            "model": model_name,
-            "type": "yolo",
-            "owlv2_status": "deactivated"
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to activate model: {str(e)}"
+            detail=str(e)
         )

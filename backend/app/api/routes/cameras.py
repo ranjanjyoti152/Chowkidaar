@@ -19,7 +19,7 @@ from app.schemas.camera import (
     CameraStatusUpdate, CameraTestResult
 )
 from app.api.deps import get_current_user, require_operator
-from app.services.yolo_detector import get_detector
+from app.services.vjepa2_service import get_vjepa2_service
 from app.services.stream_handler import get_stream_manager
 from app.services.embedding_service import get_embedding_service
 
@@ -388,26 +388,12 @@ async def stream_camera(
                 detail=f"Failed to connect to camera stream: {handler.info.error_message or 'Connection timeout'}"
             )
     
-    # Get detector if detection enabled
-    detector = None
-    if detection and camera.detection_enabled:
-        detector = await get_detector()
+    # V-JEPA 2 is video-based and doesn't provide per-frame bounding boxes
+    # Detection happens in the background via the detection service
     
     async def generate():
         async for frame in handler.frame_generator():
-            output_frame = frame
-            
-            # Run detection on every frame for precise bounding box tracking
-            if detector:
-                try:
-                    detection_result = await detector.detect(frame)
-                    detections = detection_result.get("objects", [])
-                    if detections:
-                        output_frame = detector.draw_detections(frame, detections, use_track_colors=True)
-                except Exception as e:
-                    pass  # Silently continue on detection errors
-            
-            _, buffer = cv2.imencode('.jpg', output_frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
             yield (
                 b'--frame\r\n'
                 b'Content-Type: image/jpeg\r\n\r\n' +
@@ -419,3 +405,4 @@ async def stream_camera(
         generate(),
         media_type="multipart/x-mixed-replace; boundary=frame"
     )
+

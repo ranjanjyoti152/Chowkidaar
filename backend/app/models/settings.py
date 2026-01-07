@@ -23,39 +23,16 @@ class UserSettings(Base):
         index=True
     )
     
-    # Detection settings
-    detection_model: Mapped[str] = mapped_column(String(100), default="yolov8n")
-    detection_confidence: Mapped[float] = mapped_column(default=0.5)
+    # V-JEPA 2 Detection settings
+    vjepa2_model: Mapped[str] = mapped_column(String(100), default="vjepa2-large")
+    vjepa2_buffer_size: Mapped[int] = mapped_column(default=64)  # frames in buffer
+    vjepa2_sample_rate: Mapped[int] = mapped_column(default=4)   # sample every Nth frame
     detection_device: Mapped[str] = mapped_column(String(50), default="cuda")
+    detection_confidence: Mapped[float] = mapped_column(default=0.5)
+    
+    # Legacy fields for migration compatibility (deprecated)
+    detection_model: Mapped[str] = mapped_column(String(100), default="vjepa2-large")
     enabled_classes: Mapped[list] = mapped_column(JSON, default=list)
-    
-    # OWLv2 custom queries for open-vocabulary detection
-    owlv2_queries: Mapped[list] = mapped_column(JSON, default=lambda: [
-        "a person", "a car", "a fire", "a lighter", "a dog", "a cat", 
-        "a weapon", "a knife", "a suspicious object"
-    ])
-    
-    # VLM provider settings
-    vlm_provider: Mapped[str] = mapped_column(String(50), default="ollama")  # 'ollama', 'openai', 'gemini'
-    
-    # Ollama settings
-    vlm_model: Mapped[str] = mapped_column(String(100), default="gemma3:4b")
-    vlm_url: Mapped[str] = mapped_column(String(255), default="http://localhost:11434")
-    
-    # OpenAI settings
-    openai_api_key: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    openai_model: Mapped[str] = mapped_column(String(100), default="gpt-4o")
-    openai_base_url: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    
-    # Gemini settings
-    gemini_api_key: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    gemini_model: Mapped[str] = mapped_column(String(100), default="gemini-2.0-flash-exp")
-    
-    # Common VLM settings
-    auto_summarize: Mapped[bool] = mapped_column(default=True)
-    summarize_delay: Mapped[int] = mapped_column(default=5)
-    vlm_safety_scan_enabled: Mapped[bool] = mapped_column(default=True)
-    vlm_safety_scan_interval: Mapped[int] = mapped_column(default=30)  # seconds between scans
     
     # Storage settings
     recordings_path: Mapped[str] = mapped_column(String(500), default="/data/recordings")

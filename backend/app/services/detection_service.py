@@ -1,6 +1,6 @@
 """
 Chowkidaar NVR - Background Detection Service
-Handles automatic event creation from detections
+Handles automatic event creation from V-JEPA 2 video analysis
 """
 import asyncio
 from typing import Dict, Optional, List, Set, Any
@@ -14,12 +14,8 @@ import uuid
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from sqlalchemy import select, update
-from app.services.yolo_detector import get_detector
-from app.services.owlv2_detector import get_owlv2_detector, OWLv2Detector
+from app.services.vjepa2_service import get_vjepa2_service, VJEPA2Service
 from app.services.stream_handler import get_stream_manager
-from app.services.vlm_service import get_unified_vlm_service
-from app.services.tiered_vlm_processor import get_tiered_vlm_processor, get_security_prompt
-from app.services.vlm_cache_service import get_vlm_cache
 from app.services.notification_service import send_event_notification
 from app.models.event import Event, EventType, EventSeverity
 from app.models.camera import Camera
@@ -27,7 +23,7 @@ from app.models.settings import UserSettings
 
 
 class DetectionService:
-    """Background service for detection and event creation"""
+    """Background service for V-JEPA 2 detection and event creation"""
     
     def __init__(self):
         self._running = False
@@ -35,20 +31,10 @@ class DetectionService:
         self._camera_tasks: Dict[int, asyncio.Task] = {}
         self._last_event_time: Dict[str, datetime] = {}  # "camera_id:class" -> last time
         self._event_cooldown = 10  # seconds between same class events per camera
-        self._last_vlm_scan: Dict[int, datetime] = {}  # camera_id -> last VLM scan time
-        self._vlm_scan_interval = 30  # VLM safety scan every 30 seconds
-        
-        # Anti-hallucination: Multi-frame verification
-        self._vlm_threat_cooldown: Dict[str, datetime] = {}  # "camera_id:threat_type" -> last confirmed alert
-        self._vlm_threat_cooldown_seconds = 180  # 3 minutes between same confirmed threat alerts
-        self._pending_vlm_threats: Dict[int, dict] = {}  # camera_id -> pending threat needing confirmation
-        self._vlm_confirmation_required = 2  # Need 2 consecutive detections to confirm (anti-hallucination)
         
         # Settings cache to reduce database queries
         self._settings_cache: Dict[int, Dict] = {}  # user_id -> settings dict
         self._settings_cache_time: Dict[int, datetime] = {}  # user_id -> last cache time
-        self._vlm_settings_cache: Dict[int, Dict] = {}  # user_id -> VLM settings dict
-        self._vlm_settings_cache_time: Dict[int, datetime] = {}  # user_id -> last VLM cache time
         self._settings_cache_ttl = 60  # Cache settings for 60 seconds
     
     async def start(self):
@@ -84,7 +70,6 @@ class DetectionService:
             logger.info(f"Cancelling detection loop for camera {camera_id}")
             task.cancel()
             try:
-                # Wait with timeout to avoid hanging
                 await asyncio.wait_for(task, timeout=2.0)
             except (asyncio.CancelledError, asyncio.TimeoutError):
                 pass
@@ -100,7 +85,6 @@ class DetectionService:
             try:
                 # Get all cameras with detection enabled
                 async with AsyncSessionLocal() as db:
-                    # import at top
                     result = await db.execute(
                         select(Camera).where(Camera.detection_enabled == True)
                     )
@@ -114,7 +98,6 @@ class DetectionService:
                         # Check if stream is running
                         handler = stream_manager.get_stream(camera.id)
                         is_connected = handler.is_connected() if handler else False
-                        logger.debug(f"Camera {camera.id}: handler={handler is not None}, connected={is_connected}")
                         
                         if handler and is_connected:
                             # Start detection task if not running
@@ -138,76 +121,34 @@ class DetectionService:
                 await asyncio.sleep(5)
     
     async def _detection_loop(self, camera_id: int, user_id: int):
-        """Main detection loop for a camera"""
+        """Main detection loop for a camera using V-JEPA 2"""
         stream_manager = get_stream_manager()
+        
+        # Get V-JEPA 2 service
+        vjepa2_service = await get_vjepa2_service()
         
         # Get user's detection settings
         user_settings = await self._get_user_settings(user_id)
-        model_name = user_settings.get("model", "yolov8n") if user_settings else "yolov8n"
+        model_name = user_settings.get("vjepa2_model", "vjepa2-large") if user_settings else "vjepa2-large"
         device = user_settings.get("device", "cuda") if user_settings else "cuda"
-        confidence = user_settings.get("confidence", 0.5) if user_settings else 0.5
         
-        logger.info(f"📷 Camera {camera_id}: Starting detection with model={model_name}, device={device}, confidence={confidence}")
+        logger.info(f"📷 Camera {camera_id}: Starting V-JEPA 2 detection with model={model_name}")
         
-        # Check if using OWLv2 (open-vocabulary detection)
-        use_owlv2 = model_name.startswith("owlv2")
-        owlv2_detector = None
-        yolo_detector = None
-        
-        if use_owlv2:
-            # Initialize OWLv2 detector
-            owlv2_detector = await get_owlv2_detector()
-            await owlv2_detector.initialize(model_name=model_name, device=device)
-            owlv2_detector.confidence_threshold = confidence
-            
-            # Set custom queries from user settings if available
-            custom_queries = user_settings.get("owlv2_queries", []) if user_settings else []
-            if custom_queries:
-                owlv2_detector.set_custom_queries(custom_queries)
-            
-            logger.info(f"🦉 Started OWLv2 detection loop for camera {camera_id}")
-            logger.info(f"🦉 Active queries: {owlv2_detector.get_active_queries()}")
-        else:
-            # Initialize YOLO detector
-            yolo_detector = await get_detector()
-            await yolo_detector.load_model(model_name, device)
-            yolo_detector.confidence_threshold = confidence
-        
-        # Configure VLM with user's settings
-        vlm_settings = await self._get_vlm_settings(user_id)
-        if vlm_settings:
-            vlm = get_unified_vlm_service()
-            provider = vlm_settings.get("provider", "ollama")
-            vlm.configure(
-                provider=provider,
-                ollama_url=vlm_settings.get("url", "http://localhost:11434"),
-                ollama_model=vlm_settings.get("model", "llava"),
-                openai_api_key=vlm_settings.get("openai_api_key"),
-                openai_model=vlm_settings.get("openai_model", "gpt-4o"),
-                openai_base_url=vlm_settings.get("openai_base_url"),
-                gemini_api_key=vlm_settings.get("gemini_api_key"),
-                gemini_model=vlm_settings.get("gemini_model", "gemini-2.0-flash-exp")
-            )
-            logger.info(f"VLM configured: provider={provider}")
-        
-        detector_name = "OWLv2" if use_owlv2 else "YOLO"
-        logger.info(f"🔍 Started {detector_name} detection loop for camera {camera_id} with model {model_name} on {device}")
+        # Initialize V-JEPA 2 if not already
+        if not vjepa2_service.initialized:
+            await vjepa2_service.initialize(model_name=model_name, device=device)
         
         frame_count = 0
         null_frame_count = 0
-        
-        # Fetch user's enabled detection classes
-        enabled_classes = await self._get_enabled_classes(user_id)
-        logger.info(f"Camera {camera_id}: Enabled classes for user {user_id}: {enabled_classes}")
         
         while self._running:
             try:
                 handler = stream_manager.get_stream(camera_id)
                 if not handler or not handler.is_connected():
                     logger.warning(f"Camera {camera_id}: Stream disconnected, stopping detection")
-                    break  # Exit if stream stopped
+                    break
                 
-                # Use async get_frame for better async handling
+                # Get frame from stream
                 frame = await handler.get_frame_async(timeout=0.5)
                 if frame is None:
                     null_frame_count += 1
@@ -219,74 +160,24 @@ class DetectionService:
                 null_frame_count = 0
                 frame_count += 1
                 
-                # Refresh enabled classes periodically (every 100 frames)
-                if frame_count % 100 == 0:
-                    enabled_classes = await self._get_enabled_classes(user_id)
-                    # For OWLv2, also refresh custom queries
-                    if use_owlv2 and owlv2_detector:
-                        user_settings = await self._get_user_settings(user_id)
-                        custom_queries = user_settings.get("owlv2_queries", []) if user_settings else []
-                        if custom_queries:
-                            owlv2_detector.set_custom_queries(custom_queries)
-                    logger.debug(f"Camera {camera_id}: Refreshed enabled classes: {enabled_classes}")
+                # Process frame with V-JEPA 2 (handles buffering internally)
+                result = await vjepa2_service.process_frame(camera_id, frame)
                 
-                logger.info(f"🔎 Camera {camera_id}: Running {detector_name} detection on frame {frame_count}")
+                if result is None:
+                    # Buffer not ready yet, continue collecting frames
+                    continue
                 
-                # Run detection based on model type
-                if use_owlv2 and owlv2_detector:
-                    # OWLv2 open-vocabulary detection (no tracking)
-                    detection_result = await owlv2_detector.detect(frame)
-                    active_detector = owlv2_detector
-                else:
-                    # YOLO detection with object tracking (ByteTrack)
-                    detection_result = await yolo_detector.track(
-                        frame, 
-                        camera_id=camera_id,
-                        confidence_threshold=confidence
-                    )
-                    active_detector = yolo_detector
-                
-                detections = detection_result.get("objects", [])
-                
-                logger.info(f"Camera {camera_id}: Found {len(detections)} objects")
+                detections = result.get("detections", [])
                 
                 if not detections:
                     continue
                 
-                # Filter for significant detections
-                # OWLv2 uses lower thresholds, so adjust accordingly
-                min_confidence = 0.15 if use_owlv2 else 0.5
-                significant = [d for d in detections if d["confidence"] > min_confidence]
-                if not significant:
-                    logger.debug(f"Camera {camera_id}: No significant detections (confidence > {min_confidence})")
-                    continue
+                logger.info(f"🎬 Camera {camera_id}: V-JEPA 2 detected {len(detections)} activities")
                 
-                # Filter by enabled classes (only for YOLO, OWLv2 uses queries)
-                if not use_owlv2 and enabled_classes:
-                    filtered = [d for d in significant if d["class_name"].lower() in enabled_classes]
-                    if not filtered:
-                        logger.debug(f"Camera {camera_id}: No detections matching enabled classes. Detected: {[d['class_name'] for d in significant]}")
-                        continue
-                    significant = filtered
-                
-                logger.info(f"📸 Camera {camera_id}: {len(significant)} significant detections: {[d['class_name'] for d in significant]}")
-                
-                # Check cooldown and create events
+                # Process detections and create events
                 await self._process_detections(
-                    camera_id, user_id, frame, significant, active_detector
+                    camera_id, user_id, frame, detections, vjepa2_service
                 )
-                
-                # Periodic VLM safety scan (even if YOLO missed something)
-                # Get scan interval from user settings
-                vlm_settings = await self._get_vlm_settings(user_id)
-                scan_interval = vlm_settings.get("safety_scan_interval", 30) if vlm_settings else 30
-                
-                now = datetime.now()
-                last_scan = self._last_vlm_scan.get(camera_id)
-                if not last_scan or (now - last_scan).total_seconds() >= scan_interval:
-                    self._last_vlm_scan[camera_id] = now
-                    # Run VLM safety scan in background (don't block detection loop)
-                    asyncio.create_task(self._vlm_safety_scan(camera_id, user_id, frame))
                 
             except asyncio.CancelledError:
                 break
@@ -294,22 +185,9 @@ class DetectionService:
                 logger.error(f"Detection error for camera {camera_id}: {e}")
                 await asyncio.sleep(1)
         
+        # Clear buffer when loop ends
+        vjepa2_service.clear_buffer(camera_id)
         logger.info(f"Stopped detection loop for camera {camera_id}")
-    
-    async def _get_enabled_classes(self, user_id: int) -> Set[str]:
-        """Get user's enabled detection classes from settings using cache"""
-        try:
-            # Use cached settings instead of querying database
-            settings = await self._get_user_settings(user_id)
-            if settings and settings.get("enabled_classes"):
-                # Convert to lowercase set for comparison
-                return set(c.lower() for c in settings["enabled_classes"])
-            
-            # Default: empty set if no settings
-            return set()
-        except Exception as e:
-            logger.error(f"Failed to get enabled classes for user {user_id}: {e}")
-            return set()
     
     def _is_cache_valid(self, user_id: int) -> bool:
         """Check if settings cache is still valid"""
@@ -323,13 +201,9 @@ class DetectionService:
         if user_id:
             self._settings_cache.pop(user_id, None)
             self._settings_cache_time.pop(user_id, None)
-            self._vlm_settings_cache.pop(user_id, None)
-            self._vlm_settings_cache_time.pop(user_id, None)
         else:
             self._settings_cache.clear()
             self._settings_cache_time.clear()
-            self._vlm_settings_cache.clear()
-            self._vlm_settings_cache_time.clear()
     
     async def _get_user_settings(self, user_id: int) -> Optional[Dict[str, Any]]:
         """Get user's detection settings from database with caching"""
@@ -339,7 +213,6 @@ class DetectionService:
         
         try:
             async with AsyncSessionLocal() as db:
-                # import at top
                 result = await db.execute(
                     select(UserSettings).where(UserSettings.user_id == user_id)
                 )
@@ -347,14 +220,10 @@ class DetectionService:
                 
                 if user_settings:
                     settings_dict = {
-                        "model": user_settings.detection_model,
-                        "device": user_settings.detection_device,
-                        "confidence": user_settings.detection_confidence,
-                        "enabled_classes": user_settings.enabled_classes or [],
-                        "owlv2_queries": getattr(user_settings, 'owlv2_queries', [
-                            "a person", "a car", "a fire", "a lighter", "a dog", "a cat", 
-                            "a weapon", "a knife", "a suspicious object"
-                        ]) or []
+                        "vjepa2_model": getattr(user_settings, 'vjepa2_model', 'vjepa2-large'),
+                        "device": getattr(user_settings, 'detection_device', 'cuda'),
+                        "buffer_size": getattr(user_settings, 'vjepa2_buffer_size', 64),
+                        "sample_rate": getattr(user_settings, 'vjepa2_sample_rate', 4),
                     }
                     # Update cache
                     self._settings_cache[user_id] = settings_dict
@@ -365,116 +234,61 @@ class DetectionService:
             logger.error(f"Failed to get user settings for user {user_id}: {e}")
             return None
     
-    def _is_vlm_cache_valid(self, user_id: int) -> bool:
-        """Check if VLM settings cache is still valid"""
-        if user_id not in self._vlm_settings_cache_time:
-            return False
-        cache_age = (datetime.now() - self._vlm_settings_cache_time[user_id]).total_seconds()
-        return cache_age < self._settings_cache_ttl
-    
-    async def _get_vlm_settings(self, user_id: int) -> Optional[Dict[str, Any]]:
-        """Get user's VLM settings from database with caching"""
-        # Check cache first
-        if self._is_vlm_cache_valid(user_id) and user_id in self._vlm_settings_cache:
-            return self._vlm_settings_cache.get(user_id)
-        
-        try:
-            async with AsyncSessionLocal() as db:
-                # import at top
-                result = await db.execute(
-                    select(UserSettings).where(UserSettings.user_id == user_id)
-                )
-                user_settings = result.scalar_one_or_none()
-                
-                if user_settings:
-                    vlm_settings = {
-                        "provider": getattr(user_settings, 'vlm_provider', 'ollama'),
-                        "url": user_settings.vlm_url,
-                        "model": user_settings.vlm_model,
-                        "auto_summarize": user_settings.auto_summarize,
-                        "summarize_delay": user_settings.summarize_delay,
-                        "safety_scan_enabled": getattr(user_settings, 'vlm_safety_scan_enabled', True),
-                        "safety_scan_interval": getattr(user_settings, 'vlm_safety_scan_interval', 30),
-                        "openai_api_key": getattr(user_settings, 'openai_api_key', None),
-                        "openai_model": getattr(user_settings, 'openai_model', 'gpt-4o'),
-                        "openai_base_url": getattr(user_settings, 'openai_base_url', None),
-                        "gemini_api_key": getattr(user_settings, 'gemini_api_key', None),
-                        "gemini_model": getattr(user_settings, 'gemini_model', 'gemini-2.0-flash-exp')
-                    }
-                    # Update cache
-                    self._vlm_settings_cache[user_id] = vlm_settings
-                    self._vlm_settings_cache_time[user_id] = datetime.now()
-                    return vlm_settings
-                return None
-        except Exception as e:
-            logger.error(f"Failed to get VLM settings for user {user_id}: {e}")
-            return None
-    
     async def _process_detections(
         self, 
         camera_id: int, 
         user_id: int,
         frame: np.ndarray,
         detections: List[dict],
-        detector
+        vjepa2_service: VJEPA2Service
     ):
-        """Process detections and create events"""
+        """Process V-JEPA 2 detections and create events"""
         now = datetime.now()
         
-        # Group all detections of same class together
-        class_detections = {}
         for detection in detections:
-            class_name = detection["class_name"]
-            if class_name not in class_detections:
-                class_detections[class_name] = []
-            class_detections[class_name].append(detection)
-        
-        # Create one event per class with all detections of that class
-        for class_name, class_dets in class_detections.items():
-            cooldown_key = f"{camera_id}:{class_name}"
+            activity = detection.get("class", "unknown")
+            cooldown_key = f"{camera_id}:{activity}"
             
-            # Check cooldown for this class on this camera
+            # Check cooldown
             last_time = self._last_event_time.get(cooldown_key)
             if last_time and (now - last_time).seconds < self._event_cooldown:
-                continue  # Skip - still in cooldown
+                continue
             
             # Update cooldown
             self._last_event_time[cooldown_key] = now
             
-            # Use highest confidence detection for primary info
-            primary_detection = max(class_dets, key=lambda x: x["confidence"])
+            # Get event type and severity from detection
+            event_type = detection.get("event_type")
+            if event_type is None:
+                event_type = EventType.motion_detected
             
-            # Determine event type and severity
-            event_type = self._get_event_type(class_dets)
-            severity = self._get_severity(class_dets)
+            severity = detection.get("severity", EventSeverity.low)
+            confidence = detection.get("confidence", 0.5)
+            description = detection.get("description", f"Activity detected: {activity}")
             
-            # Count of this class
-            count = len(class_dets)
-            logger.info(f"🔔 Creating event: type={event_type.value}, severity={severity.value}, class={class_name}, count={count}")
+            logger.info(f"🔔 Creating event: type={event_type.value}, severity={severity.value}, activity={activity}")
             
-            # Save frame with ALL detections of this class drawn
-            frame_path = await self._save_frame(camera_id, frame, class_dets, detector)
-            logger.debug(f"Frame saved to: {frame_path}")
+            # Save frame
+            frame_path = await self._save_frame(camera_id, frame)
             
-            # Create event in database with ALL detected objects
+            # Create event in database
             try:
                 async with AsyncSessionLocal() as db:
                     event = Event(
                         event_type=event_type,
                         severity=severity,
                         detected_objects=[{
-                            "class": d["class_name"],
-                            "confidence": d["confidence"],
-                            "bbox": d["bbox"]
-                        } for d in class_dets],
-                        confidence_score=primary_detection["confidence"],
+                            "class": activity,
+                            "confidence": confidence,
+                            "bbox": detection.get("bbox")
+                        }],
+                        confidence_score=confidence,
                         frame_path=frame_path,
                         thumbnail_path=frame_path,
+                        summary=description,
                         detection_metadata={
-                            "model": "yolov8",
-                            "class": class_name,
-                            "count": count,
-                            "all_confidences": [d["confidence"] for d in class_dets]
+                            "model": "vjepa2",
+                            "activity": activity,
                         },
                         timestamp=now,
                         camera_id=camera_id,
@@ -484,27 +298,18 @@ class DetectionService:
                     await db.commit()
                     await db.refresh(event)
                     
-                    logger.info(f"✅ Event created: ID={event.id}, {event_type.value} ({count}x {class_name}) on camera {camera_id}")
+                    logger.info(f"✅ Event created: ID={event.id}, {event_type.value} - {activity}")
                     
-                    # Generate summary with VLM and then send notification
+                    # Send notification
                     asyncio.create_task(
-                        self._generate_summary_and_notify(event.id, frame, class_dets, user_id, camera_id)
+                        self._send_notification(event.id, description, severity, user_id, camera_id)
                     )
                     
             except Exception as e:
                 logger.error(f"❌ Failed to create event: {e}", exc_info=True)
     
-    async def _save_frame(
-        self, 
-        camera_id: int, 
-        frame: np.ndarray, 
-        detections: List[dict],
-        detector
-    ) -> str:
-        """Save frame with detections drawn"""
-        # Draw detections on frame
-        annotated = detector.draw_detections(frame, detections)
-        
+    async def _save_frame(self, camera_id: int, frame: np.ndarray) -> str:
+        """Save frame to disk"""
         # Create filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"cam{camera_id}_{timestamp}_{uuid.uuid4().hex[:8]}.jpg"
@@ -515,823 +320,50 @@ class DetectionService:
         filepath = frames_dir / filename
         
         # Save frame
-        cv2.imwrite(str(filepath), annotated)
+        cv2.imwrite(str(filepath), frame)
         
-        # Return absolute path
         return str(filepath)
     
-    async def _generate_summary_and_notify(
-        self, 
-        event_id: int, 
-        frame: np.ndarray,
-        detections: List[dict],
-        user_id: int,
-        camera_id: int = None
-    ):
-        """Generate VLM summary, intelligent severity assessment, and send notification
-        
-        Uses tiered processing:
-        - SKIP tier: Template-based summaries for low-severity routine events
-        - FAST tier: Uses cache or fast local model for medium severity
-        - BEST tier: Uses best VLM provider for high/critical events
-        """
-        try:
-            # Get tiered processor and cache
-            tiered_processor = get_tiered_vlm_processor()
-            vlm_cache = get_vlm_cache()
-            
-            # Get detection classes for cache key
-            detection_classes = tuple(sorted(set(d["class_name"].lower() for d in detections)))
-            current_hour = datetime.now().hour
-            
-            # Phase 1: Estimate severity from detections to determine tier
-            preliminary_severity = tiered_processor.estimate_severity_from_detections(
-                detections, hour=current_hour
-            )
-            vlm_tier = tiered_processor.get_vlm_tier(preliminary_severity)
-            logger.debug(f"Event {event_id}: preliminary_severity={preliminary_severity}, tier={vlm_tier}")
-            
-            # Phase 2: Check if we can skip VLM entirely (template-based)
-            should_skip, template_summary = tiered_processor.should_skip_vlm(
-                detections, preliminary_severity
-            )
-            
-            if should_skip and template_summary:
-                logger.info(f"⚡ Event {event_id}: Using template summary (skipping VLM)")
-                await self._update_event_with_summary(
-                    event_id, template_summary, preliminary_severity, 
-                    self._get_event_type(detections).value, user_id, camera_id
-                )
-                return
-            
-            # Phase 3: Check VLM cache for similar frames
-            if vlm_cache.is_available() and camera_id:
-                cached = await vlm_cache.get(frame, camera_id, detection_classes)
-                if cached:
-                    logger.info(f"⚡ Event {event_id}: Cache HIT - reusing summary")
-                    await self._update_event_with_summary(
-                        event_id, cached.summary, cached.severity, 
-                        cached.event_type, user_id, camera_id
-                    )
-                    return
-            
-            # Phase 4: Get VLM settings and configure
-            vlm_settings = await self._get_vlm_settings(user_id)
-            vlm = get_unified_vlm_service()
-            
-            if vlm_settings:
-                provider = vlm_settings.get("provider", "ollama")
-                vlm.configure(
-                    provider=provider,
-                    ollama_url=vlm_settings.get("url", "http://localhost:11434"),
-                    ollama_model=vlm_settings.get("model", "gemma3:4b"),
-                    openai_api_key=vlm_settings.get("openai_api_key"),
-                    openai_model=vlm_settings.get("openai_model", "gpt-4o"),
-                    openai_base_url=vlm_settings.get("openai_base_url"),
-                    gemini_api_key=vlm_settings.get("gemini_api_key"),
-                    gemini_model=vlm_settings.get("gemini_model", "gemini-2.0-flash-exp")
-                )
-                logger.debug(f"VLM configured for summary: provider={provider}, tier={vlm_tier}")
-            
-            # Fetch camera context for intelligent severity assessment
-            camera_context = ""
-            camera_name = "Unknown Camera"
-            if camera_id:
-                try:
-                    async with AsyncSessionLocal() as db:
-                        from app.models.camera import Camera
-                        result = await db.execute(
-                            select(Camera).where(Camera.id == camera_id)
-                        )
-                        camera = result.scalar_one_or_none()
-                        if camera:
-                            camera_name = camera.name or f"Camera {camera_id}"
-                            if camera.location_type or camera.expected_activity or camera.unexpected_activity or camera.normal_conditions:
-                                camera_context = f"""\n\n📍 CAMERA CONTEXT (VERY IMPORTANT - adjust severity based on this):
-- Camera: {camera_name}
-- Location Type: {camera.location_type or 'Not specified'}
-- Expected Activity (NORMAL → LOW): {camera.expected_activity or 'Not specified'}
-- Unexpected Activity (ALERT → HIGH): {camera.unexpected_activity or 'Not specified'}
-- Normal Conditions: {camera.normal_conditions or 'Not specified'}
-
-⚠️ SEVERITY RULES based on camera context:
-✅ If activity matches "Expected Activity" → LOW severity (normal behavior)
-🚨 If activity matches "Unexpected Activity" → HIGH severity (alert needed!)
-- Example: Kitchen with expected="cooking with fire" → fire on stove = LOW
-- Example: Kitchen with unexpected="fire outside stove area" → fire on floor = HIGH
-- Example: Office with expected="people working" → 10 people typing = LOW
-- Example: Office with unexpected="running, fighting" → people running = HIGH"""
-                            else:
-                                camera_context = f"\n\n📍 Camera: {camera_name} (No context configured - use default severity rules)"
-                except Exception as e:
-                    logger.warning(f"Failed to fetch camera context: {e}")
-            
-            # Create detailed detection info with counts
-            class_counts = {}
-            for d in detections:
-                cn = d["class_name"]
-                if cn not in class_counts:
-                    class_counts[cn] = {"count": 0, "confidences": []}
-                class_counts[cn]["count"] += 1
-                class_counts[cn]["confidences"].append(d["confidence"])
-            
-            # Format: "3x person (85%, 78%, 72%), 2x car (91%, 88%)"
-            detection_summary = ", ".join([
-                f"{info['count']}x {cls} ({', '.join([f'{c:.0%}' for c in info['confidences']])})"
-                for cls, info in class_counts.items()
-            ])
-            
-            total_objects = len(detections)
-            current_time = datetime.now()
-            hour = current_time.hour
-            
-            # More detailed time context
-            if hour >= 0 and hour < 5:
-                time_context = "late night (most suspicious time)"
-            elif hour >= 5 and hour < 7:
-                time_context = "early morning"
-            elif hour >= 7 and hour < 12:
-                time_context = "morning"
-            elif hour >= 12 and hour < 17:
-                time_context = "afternoon"
-            elif hour >= 17 and hour < 20:
-                time_context = "evening"
-            elif hour >= 20 and hour < 22:
-                time_context = "night"
-            else:
-                time_context = "late night (suspicious time)"
-            
-            # Combined prompt for summary AND severity analysis - BALANCED for accuracy
-            prompt = f"""You are a PRECISE security AI. Detect REAL threats, avoid FALSE ALARMS.
-
-🚨 REAL THREATS TO FLAG (HIGH/CRITICAL):
-- 🔥 REAL FIRE: Actual flames burning something, fire spreading, orange/yellow flames with smoke
-- 💨 REAL SMOKE: Gray/black smoke rising from burning, not steam or mist
-- 🔪 WEAPONS: Gun, knife being threatened with, not kitchen knives in kitchen
-- 👊 VIOLENCE: Actual physical assault, hitting, not playful interaction
-- 🚶 FALL/MEDICAL: Person collapsed on ground, unconscious, not sitting/resting intentionally
-- 🏃 THEFT: Someone grabbing items and fleeing, not carrying own belongings
-- 💥 ACCIDENT: Vehicle crash, person injured, visible damage
-- 🚪 BREAK-IN: Forcing door/window, breaking glass
-
-❌ NOT THREATS (DO NOT FLAG AS HIGH):
-- RGB lights, LED strips, neon signs, colored decorative lights = NOT FIRE
-- Pink/purple/blue wall lights = decorative lighting, NOT fire
-- Computer monitors glowing = NOT fire
-- Steam from cooking, fog machine, vape = NOT dangerous smoke
-- Person sitting on floor intentionally = NOT a fall
-- Person lying on couch/bed = NOT unconscious
-- Kitchen knife while cooking = NOT weapon
-- Kids play-fighting = NOT violence
-- Person carrying their own bags = NOT theft
-
-DETECTION INFO:
-- Camera: {camera_name}
-- Objects Detected: {detection_summary}
-- Count: {total_objects} object(s)
-- Time: {time_context} ({current_time.strftime('%I:%M %p')}){camera_context}
-
-SEVERITY RULES:
-🔴 CRITICAL: Active real fire with flames, violence with injury, weapon pointed at person
-🟠 HIGH: Real lighter/match with flame, person collapsed unexpectedly, theft in progress, intruder at night
-🟡 MEDIUM: Suspicious behavior, unknown person, unusual activity
-🟢 LOW: Normal activity, decorative lights, people working/sitting, routine behavior
-
-⚠️ IMPORTANT DISTINCTIONS:
-- Colored LED/RGB lights on wall = LOW (decorative) 
-- Actual flame burning something = CRITICAL (fire)
-- Person sitting on floor by choice = LOW (normal)
-- Person fallen and not moving = HIGH (emergency)
-
-RESPOND IN THIS EXACT FORMAT:
-SUMMARY: [Describe what you ACTUALLY see. Be specific about colors, positions, actions]
-THREAT_LEVEL: [low/medium/high/critical]
-EVENT_TYPE: [Choose based on what's detected:
-  - person_detected: If a person is visible
-  - vehicle_detected: If car/truck/motorcycle visible
-  - animal_detected: If animal visible
-  - object_detected: For furniture, electronics, objects (chair, tv, laptop, etc.)
-  - fire_detected/smoke_detected: For fire/smoke
-  - intrusion/suspicious/theft_attempt: For security threats
-  - delivery/visitor: For guests/delivery
-  - motion_detected: Default if none of the above]"""
-            
-            # Generate analysis using describe_frame
-            logger.debug(f"Calling VLM for event summary with model: {vlm_settings.get('model') if vlm_settings else 'default'}")
-            response = await vlm.describe_frame(frame, detections, prompt)
-            
-            if response and not response.startswith("Error") and not response.startswith("Failed"):
-                logger.debug(f"VLM raw response: {response[:200]}...")
-                # Parse the response - handle multi-line values
-                summary = ""
-                threat_level = "low"
-                event_type_str = ""
-                threat_reason = ""
-                
-                # Use regex-like parsing for better extraction
-                response_upper = response.upper()
-                response_clean = response.replace('**', '').replace('*', '')
-                
-                # Find SUMMARY
-                if 'SUMMARY:' in response_upper:
-                    start = response_upper.find('SUMMARY:') + 8
-                    # Find next field or end
-                    end = len(response)
-                    for marker in ['THREAT_LEVEL:', 'EVENT_TYPE:', 'THREAT_REASON:']:
-                        pos = response_upper.find(marker, start)
-                        if pos != -1 and pos < end:
-                            end = pos
-                    summary = response_clean[start:end].strip()
-                
-                # Find THREAT_LEVEL
-                if 'THREAT_LEVEL:' in response_upper:
-                    start = response_upper.find('THREAT_LEVEL:') + 13
-                    end = len(response)
-                    for marker in ['EVENT_TYPE:', 'THREAT_REASON:', 'SUMMARY:']:
-                        pos = response_upper.find(marker, start)
-                        if pos != -1 and pos < end:
-                            end = pos
-                    level = response_clean[start:end].strip().lower().split()[0] if response_clean[start:end].strip() else 'low'
-                    if level in ['low', 'medium', 'high', 'critical']:
-                        threat_level = level
-                
-                # Find EVENT_TYPE
-                if 'EVENT_TYPE:' in response_upper:
-                    start = response_upper.find('EVENT_TYPE:') + 11
-                    end = len(response)
-                    for marker in ['THREAT_LEVEL:', 'THREAT_REASON:', 'SUMMARY:']:
-                        pos = response_upper.find(marker, start)
-                        if pos != -1 and pos < end:
-                            end = pos
-                    event_type_str = response_clean[start:end].strip().lower().split()[0] if response_clean[start:end].strip() else ''
-                    # Remove any trailing punctuation
-                    event_type_str = event_type_str.rstrip('.,;:')
-                
-                # Find THREAT_REASON
-                if 'THREAT_REASON:' in response_upper:
-                    start = response_upper.find('THREAT_REASON:') + 14
-                    end = len(response)
-                    for marker in ['SUMMARY:', 'THREAT_LEVEL:', 'EVENT_TYPE:']:
-                        pos = response_upper.find(marker, start)
-                        if pos != -1 and pos < end:
-                            end = pos
-                    threat_reason = response_clean[start:end].strip()
-                
-                # If parsing failed, use full response as summary
-                if not summary:
-                    summary = response_clean.strip()[:500]  # Limit to 500 chars
-                
-                logger.debug(f"VLM Response parsed - Summary: {summary[:50]}..., Level: {threat_level}, Type: {event_type_str}")
-                
-                # Map threat level to severity enum
-                severity_map = {
-                    'low': EventSeverity.low,
-                    'medium': EventSeverity.medium,
-                    'high': EventSeverity.high,
-                    'critical': EventSeverity.critical
-                }
-                new_severity = severity_map.get(threat_level, EventSeverity.low)
-                
-                # Map LLM event type to enum
-                event_type_map = {
-                    'delivery': EventType.delivery,
-                    'visitor': EventType.visitor,
-                    'package_left': EventType.package_left,
-                    'suspicious': EventType.suspicious,
-                    'intrusion': EventType.intrusion,
-                    'loitering': EventType.loitering,
-                    'theft_attempt': EventType.theft_attempt,
-                    'person_detected': EventType.person_detected,
-                    'vehicle_detected': EventType.vehicle_detected,
-                    'animal_detected': EventType.animal_detected,
-                    'object_detected': EventType.object_detected,
-                    'motion_detected': EventType.motion_detected,
-                    'fire_detected': EventType.fire_detected,
-                    'smoke_detected': EventType.smoke_detected,
-                }
-                new_event_type = event_type_map.get(event_type_str)
-                
-                # Prepare update values
-                update_values = {
-                    "summary": summary,
-                    "severity": new_severity,
-                    "detection_metadata": {
-                        "ai_threat_level": threat_level,
-                        "ai_event_type": event_type_str,
-                        "ai_threat_reason": threat_reason,
-                        "time_context": time_context,
-                        "analyzed_at": datetime.now().isoformat()
-                    },
-                    "summary_generated_at": datetime.now()
-                }
-                
-                # Update event type only if LLM classified it
-                if new_event_type:
-                    update_values["event_type"] = new_event_type
-                
-                # Update event with AI-analyzed summary, severity and event type
-                async with AsyncSessionLocal() as db:
-                    # import at top
-                    await db.execute(
-                        update(Event)
-                        .where(Event.id == event_id)
-                        .values(**update_values)
-                    )
-                    await db.commit()
-                    
-                    event_label = event_type_str or "unknown"
-                    if threat_level in ['high', 'critical']:
-                        logger.warning(f"🚨 {threat_level.upper()} THREAT Event {event_id}: {event_label} - {threat_reason}")
-                    else:
-                        logger.info(f"✨ Event {event_id} classified as '{event_label}' ({threat_level}) - {summary[:50]}...")
-                    
-                    # Cache VLM response for similar future frames
-                    if camera_id and vlm_cache.is_available():
-                        await vlm_cache.put(
-                            frame, camera_id, detection_classes,
-                            summary, threat_level, event_type_str or "motion_detected"
-                        )
-                        cache_stats = vlm_cache.get_stats()
-                        logger.debug(f"VLM cache stats: {cache_stats['hit_rate_percent']}% hit rate, {cache_stats['cache_size']} entries")
-                    
-                    # Send notification after summary is generated
-                    # Fetch updated event for notification
-                    result = await db.execute(
-                        select(Event).where(Event.id == event_id)
-                    )
-                    updated_event = result.scalar_one_or_none()
-                    if updated_event:
-                        await send_event_notification(updated_event, user_id)
-                    
-        except Exception as e:
-            logger.error(f"Failed to generate summary: {e}")
-    
-    def _get_event_type(self, detections: List[dict]) -> EventType:
-        """Determine event type from detections"""
-        classes = [d["class_name"].lower() for d in detections]
-        
-        if "fire" in classes:
-            return EventType.fire_detected
-        if "smoke" in classes:
-            return EventType.smoke_detected
-        if "person" in classes:
-            return EventType.person_detected
-        if any(c in classes for c in ["car", "truck", "bus", "motorcycle"]):
-            return EventType.vehicle_detected
-        if any(c in classes for c in ["dog", "cat", "bird", "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe"]):
-            return EventType.animal_detected
-        
-        # Common objects like furniture, electronics - classify as object_detected
-        common_objects = ["chair", "couch", "sofa", "bed", "dining table", "table", "tv", "television",
-                          "laptop", "computer", "monitor", "keyboard", "mouse", "cell phone", "phone",
-                          "book", "clock", "vase", "scissors", "teddy bear", "toothbrush", "remote",
-                          "refrigerator", "oven", "microwave", "toaster", "sink", "bottle", "cup"]
-        if any(c in classes for c in common_objects):
-            return EventType.object_detected
-        
-        # For anything else - motion detected
-        return EventType.motion_detected
-    
-    def _get_severity(self, detections: List[dict]) -> EventSeverity:
-        """Initial severity from detections (will be refined by AI analysis)"""
-        classes = [d["class_name"].lower() for d in detections]
-        
-        # Basic initial severity - AI will analyze and update
-        if "fire" in classes or "knife" in classes or "gun" in classes:
-            return EventSeverity.critical
-        if "smoke" in classes:
-            return EventSeverity.high
-        
-        # Check time - night detections are more serious
-        hour = datetime.now().hour
-        is_night = hour >= 22 or hour < 6
-        
-        if "person" in classes:
-            # Multiple people or night time = higher initial severity
-            person_count = sum(1 for d in detections if d["class_name"].lower() == "person")
-            if is_night or person_count > 1:
-                return EventSeverity.high
-            return EventSeverity.medium
-        
-        return EventSeverity.low
-    
-    async def _update_event_with_summary(
+    async def _send_notification(
         self,
         event_id: int,
         summary: str,
-        severity: str,
-        event_type: str,
+        severity: EventSeverity,
         user_id: int,
-        camera_id: int = None
+        camera_id: int
     ):
-        """
-        Update event with summary (from template or cache).
-        Used for fast path when VLM is skipped or cached.
-        """
+        """Send notification for event"""
         try:
-            # Map severity string to enum
-            severity_map = {
-                'low': EventSeverity.low,
-                'medium': EventSeverity.medium,
-                'high': EventSeverity.high,
-                'critical': EventSeverity.critical
-            }
-            severity_enum = severity_map.get(severity, EventSeverity.low)
-            
-            # Map event type string to enum
-            event_type_map = {
-                'person_detected': EventType.person_detected,
-                'vehicle_detected': EventType.vehicle_detected,
-                'animal_detected': EventType.animal_detected,
-                'object_detected': EventType.object_detected,
-                'motion_detected': EventType.motion_detected,
-                'fire_detected': EventType.fire_detected,
-                'smoke_detected': EventType.smoke_detected,
-                'delivery': EventType.delivery,
-                'visitor': EventType.visitor,
-                'suspicious': EventType.suspicious,
-                'intrusion': EventType.intrusion,
-            }
-            event_type_enum = event_type_map.get(event_type)
-            
-            update_values = {
-                "summary": summary,
-                "severity": severity_enum,
-                "detection_metadata": {
-                    "source": "template_or_cache",
-                    "analyzed_at": datetime.now().isoformat()
-                },
-                "summary_generated_at": datetime.now()
-            }
-            
-            if event_type_enum:
-                update_values["event_type"] = event_type_enum
-            
-            async with AsyncSessionLocal() as db:
-                await db.execute(
-                    update(Event)
-                    .where(Event.id == event_id)
-                    .values(**update_values)
-                )
-                await db.commit()
-                
-                logger.info(f"✅ Event {event_id} updated with template/cached summary")
-                
-                # Send notification
-                result = await db.execute(
-                    select(Event).where(Event.id == event_id)
-                )
-                updated_event = result.scalar_one_or_none()
-                if updated_event:
-                    await send_event_notification(updated_event, user_id)
-                    
-        except Exception as e:
-            logger.error(f"Failed to update event with summary: {e}")
-    
-    async def stop_all(self):
-        """Stop all detection tasks"""
-        await self.stop()
-    
-    async def _vlm_safety_scan(self, camera_id: int, user_id: int, frame: np.ndarray):
-        """
-        Periodic VLM scan to detect threats that YOLO might miss.
-        This catches fire, weapons, violence, and other dangerous situations
-        even if they're not in YOLO's training classes.
-        """
-        try:
-            vlm_settings = await self._get_vlm_settings(user_id)
-            if not vlm_settings:
-                return  # VLM not configured
-            
-            # Check if safety scan is enabled
-            if not vlm_settings.get("safety_scan_enabled", True):
-                return  # Safety scan disabled by user
-            
-            vlm = get_unified_vlm_service()
-            provider = vlm_settings.get("provider", "ollama")
-            vlm.configure(
-                provider=provider,
-                ollama_url=vlm_settings.get("url", "http://localhost:11434"),
-                ollama_model=vlm_settings.get("model", "gemma3:4b"),
-                openai_api_key=vlm_settings.get("openai_api_key"),
-                openai_model=vlm_settings.get("openai_model", "gpt-4o"),
-                openai_base_url=vlm_settings.get("openai_base_url"),
-                gemini_api_key=vlm_settings.get("gemini_api_key"),
-                gemini_model=vlm_settings.get("gemini_model", "gemini-2.0-flash-exp")
-            )
-            
-            # Fetch camera context for safety scan
-            camera_context = ""
+            # Get camera name
             camera_name = f"Camera {camera_id}"
-            try:
-                async with AsyncSessionLocal() as db:
-                    from app.models.camera import Camera
-                    result = await db.execute(
-                        select(Camera).where(Camera.id == camera_id)
-                    )
-                    camera = result.scalar_one_or_none()
-                    if camera:
-                        camera_name = camera.name or f"Camera {camera_id}"
-                        if camera.expected_activity or camera.unexpected_activity:
-                            camera_context = f"""
-CAMERA CONTEXT:
-- Location: {camera.location_type or 'Unknown'}
-- Expected (NORMAL): {camera.expected_activity or 'Not specified'}
-- Unexpected (ALERT): {camera.unexpected_activity or 'Not specified'}
-- Normal Conditions: {camera.normal_conditions or 'Not specified'}
-
-⚠️ If you see activity matching "Expected" → it's probably SAFE
-⚠️ If you see activity matching "Unexpected" → it might be a threat"""
-            except Exception as e:
-                logger.warning(f"Failed to get camera context for safety scan: {e}")
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(
+                    select(Camera).where(Camera.id == camera_id)
+                )
+                camera = result.scalar_one_or_none()
+                if camera:
+                    camera_name = camera.name or camera_name
             
-            current_time = datetime.now()
-            hour = current_time.hour
-            
-            if hour >= 0 and hour < 5:
-                time_context = "late night (most suspicious time)"
-            elif hour >= 5 and hour < 7:
-                time_context = "early morning"
-            elif hour >= 7 and hour < 12:
-                time_context = "morning"
-            elif hour >= 12 and hour < 17:
-                time_context = "afternoon"
-            elif hour >= 17 and hour < 20:
-                time_context = "evening"
-            elif hour >= 20 and hour < 22:
-                time_context = "night"
-            else:
-                time_context = "late night"
-            
-            # Balanced safety scan - detect real threats, avoid false alarms
-            prompt = f"""You are a PRECISE security AI. Detect REAL threats, avoid FALSE ALARMS.
-
-CAMERA: {camera_name}
-TIME: {current_time.strftime('%H:%M')} ({time_context}){camera_context}
-
-🚨 REAL THREATS TO DETECT:
-
-🔥 REAL FIRE (CRITICAL/HIGH):
-- Actual flames burning something (orange/yellow fire with smoke)
-- Building/object on fire
-- Sparks causing fire
-❌ NOT FIRE: RGB/LED lights, neon signs, pink/purple/blue decorative lights, monitor glow, colored wall lights
-
-💨 REAL SMOKE (HIGH):
-- Gray/black smoke rising from burning
-- Visible smoke indicating fire
-❌ NOT SMOKE: Steam, mist, fog, vape clouds, cooking steam
-
-👤 REAL EMERGENCY (HIGH):
-- Person collapsed unexpectedly, lying motionless
-- Person fallen and appears hurt
-- Person in visible distress
-❌ NOT EMERGENCY: Person sitting on floor by choice, person resting on couch, person lying in bed
-
-🔪 REAL VIOLENCE/WEAPONS (CRITICAL):
-- Actual gun/knife being used to threaten
-- Physical assault in progress
-- Real fighting with intent to harm
-❌ NOT VIOLENCE: Kitchen knife while cooking, play-fighting, sports equipment in use
-
-🚨 REAL SECURITY THREAT (HIGH):
-- Person forcing open door/window
-- Someone grabbing items and running away
-- Unknown person at night trying to enter
-❌ NOT THREAT: Delivery person, known visitor, person carrying own items
-
-⚠️ KEY DISTINCTIONS:
-- Colored LED/RGB lights on wall = SAFE (decorative lighting)
-- Actual flame burning = CRITICAL (real fire)
-- Person relaxing on floor = SAFE (intentional)
-- Person fallen unconscious = HIGH (emergency)
-
-Respond in this EXACT format:
-THREAT_DETECTED: [yes/no]
-CONFIDENCE: [0-100]
-THREAT_TYPE: [fire/smoke/weapon/violence/intrusion/fall/theft/medical/none]
-THREAT_LEVEL: [critical/high/medium/safe]
-DESCRIPTION: [What you ACTUALLY see - be specific]"""
-
-            # Use describe_frame with empty detections list
-            response = await vlm.describe_frame(frame, [], prompt)
-            
-            if not response:
-                return
-            
-            logger.debug(f"VLM Safety Scan camera {camera_id}: {response[:100]}...")
-            
-            # Parse response
-            response_upper = response.upper()
-            response_clean = response.replace('**', '').replace('*', '')
-            
-            threat_detected = False
-            threat_type = "none"
-            threat_level = "safe"
-            description = ""
-            confidence = 0
-            doubt = ""
-            
-            # Parse CONFIDENCE first (anti-hallucination)
-            if 'CONFIDENCE:' in response_upper:
-                start = response_upper.find('CONFIDENCE:') + 11
-                end = min(start + 20, len(response))
-                conf_str = response_clean[start:end].strip()
-                # Extract number from string like "85%" or "85"
-                import re
-                conf_match = re.search(r'(\d+)', conf_str)
-                if conf_match:
-                    confidence = int(conf_match.group(1))
-            
-            # Parse THREAT_DETECTED
-            if 'THREAT_DETECTED:' in response_upper:
-                start = response_upper.find('THREAT_DETECTED:') + 16
-                end = min(start + 20, len(response))
-                answer = response_clean[start:end].strip().lower()
-                threat_detected = 'yes' in answer or 'true' in answer
-            
-            # Parse DOUBT (for logging)
-            if 'DOUBT:' in response_upper:
-                start = response_upper.find('DOUBT:') + 6
-                end = len(response)
-                for marker in ['THREAT_DETECTED:', 'CONFIDENCE:', 'THREAT_TYPE:', 'THREAT_LEVEL:', 'DESCRIPTION:']:
-                    pos = response_upper.find(marker, start)
-                    if pos != -1 and pos < end:
-                        end = pos
-                doubt = response_clean[start:end].strip()
-            
-            # Parse THREAT_TYPE
-            if 'THREAT_TYPE:' in response_upper:
-                start = response_upper.find('THREAT_TYPE:') + 12
-                end = len(response)
-                for marker in ['THREAT_LEVEL:', 'DESCRIPTION:', 'THREAT_DETECTED:']:
-                    pos = response_upper.find(marker, start)
-                    if pos != -1 and pos < end:
-                        end = pos
-                threat_type = response_clean[start:end].strip().lower().split()[0] if response_clean[start:end].strip() else 'none'
-                threat_type = threat_type.rstrip('.,;:')
-            
-            # Parse THREAT_LEVEL
-            if 'THREAT_LEVEL:' in response_upper:
-                start = response_upper.find('THREAT_LEVEL:') + 13
-                end = len(response)
-                for marker in ['THREAT_TYPE:', 'DESCRIPTION:', 'THREAT_DETECTED:', 'DOUBT:', 'CONFIDENCE:']:
-                    pos = response_upper.find(marker, start)
-                    if pos != -1 and pos < end:
-                        end = pos
-                level = response_clean[start:end].strip().lower().split()[0] if response_clean[start:end].strip() else 'safe'
-                if level in ['critical', 'high', 'medium', 'low', 'safe']:
-                    threat_level = level
-            
-            # Parse DESCRIPTION
-            if 'DESCRIPTION:' in response_upper:
-                start = response_upper.find('DESCRIPTION:') + 12
-                end = len(response)
-                for marker in ['THREAT_DETECTED:', 'THREAT_TYPE:', 'THREAT_LEVEL:', 'DOUBT:', 'CONFIDENCE:']:
-                    pos = response_upper.find(marker, start)
-                    if pos != -1 and pos < end:
-                        end = pos
-                description = response_clean[start:end].strip()
-            
-            # ========== THREAT VERIFICATION (less strict for safety) ==========
-            
-            # Check 1: Confidence threshold - lowered to 60% for safety
-            if threat_detected and confidence < 60:
-                logger.info(f"⚠️ VLM camera {camera_id}: Threat rejected - low confidence ({confidence}%)")
-                threat_detected = False
-            
-            # Check 2: Cooldown - shorter cooldown (2 min) for faster re-alerts
-            if threat_detected:
-                cooldown_key = f"{camera_id}:{threat_type}"
-                last_alert = self._vlm_threat_cooldown.get(cooldown_key)
-                # Reduced cooldown from 3 min to 2 min
-                if last_alert and (datetime.now() - last_alert).total_seconds() < 120:
-                    logger.debug(f"VLM camera {camera_id}: Threat {threat_type} in cooldown, skipping")
-                    threat_detected = False
-            
-            # Check 3: CRITICAL threats bypass multi-frame verification
-            # For safety-critical threats, alert immediately
-            if threat_detected:
-                if threat_level == 'critical' or threat_type in ['fire', 'smoke', 'weapon', 'violence', 'fall', 'medical']:
-                    # CRITICAL safety threats - IMMEDIATE alert, no waiting
-                    logger.warning(f"🚨 VLM camera {camera_id}: IMMEDIATE safety threat: {threat_type} ({confidence}%)")
-                elif threat_level in ['high', 'medium']:
-                    # Non-critical but suspicious - still do quick verification
-                    pending = self._pending_vlm_threats.get(camera_id)
-                
-                if pending and pending.get('threat_type') == threat_type:
-                    # Same threat detected again - CONFIRMED!
-                    pending['count'] = pending.get('count', 1) + 1
-                    if pending['count'] >= self._vlm_confirmation_required:
-                        logger.warning(f"✅ VLM camera {camera_id}: Threat CONFIRMED after {pending['count']} detections: {threat_type}")
-                        # Clear pending and proceed to create event
-                        self._pending_vlm_threats.pop(camera_id, None)
-                    else:
-                        logger.info(f"⏳ VLM camera {camera_id}: Threat {threat_type} pending confirmation ({pending['count']}/{self._vlm_confirmation_required})")
-                        threat_detected = False  # Wait for more confirmations
-                else:
-                    # New threat type or first detection - store as pending
-                    self._pending_vlm_threats[camera_id] = {
-                        'threat_type': threat_type,
-                        'threat_level': threat_level,
-                        'confidence': confidence,
-                        'description': description,
-                        'count': 1,
-                        'first_seen': datetime.now()
-                    }
-                    logger.info(f"⏳ VLM camera {camera_id}: New threat {threat_type} ({confidence}%) - waiting for confirmation...")
-                    threat_detected = False  # Don't alert yet, wait for confirmation
-            
-            # Critical threats bypass multi-frame check but still need high confidence
-            if threat_level == 'critical' and confidence >= 85:
-                threat_detected = True
-                logger.warning(f"🚨 VLM camera {camera_id}: CRITICAL threat ({confidence}%) - immediate alert!")
-            
-            # Clean up old pending threats (older than 2 minutes = probably false positive)
-            if camera_id in self._pending_vlm_threats:
-                pending = self._pending_vlm_threats[camera_id]
-                if (datetime.now() - pending.get('first_seen', datetime.now())).total_seconds() > 120:
-                    logger.debug(f"VLM camera {camera_id}: Clearing stale pending threat")
-                    self._pending_vlm_threats.pop(camera_id, None)
-            
-            # ========== CREATE EVENT IF CONFIRMED ==========
-            
-            if threat_detected and threat_level in ['critical', 'high', 'medium']:
-                logger.warning(f"🚨 VLM Safety Scan CONFIRMED {threat_level.upper()} threat on camera {camera_id}: {threat_type} ({confidence}%)")
-                
-                # Update cooldown
-                cooldown_key = f"{camera_id}:{threat_type}"
-                self._vlm_threat_cooldown[cooldown_key] = datetime.now()
-                
-                # Map threat type to event type
-                threat_event_map = {
-                    'fire': EventType.fire_detected,
-                    'smoke': EventType.smoke_detected,
-                    'weapon': EventType.intrusion,
-                    'violence': EventType.intrusion,
-                    'intrusion': EventType.intrusion,
-                    'suspicious_package': EventType.suspicious,
-                    'flooding': EventType.motion_detected,
-                    'medical': EventType.motion_detected,
-                    'child_danger': EventType.suspicious,
-                }
-                event_type = threat_event_map.get(threat_type, EventType.suspicious)
-                
-                # Map threat level to severity
-                severity_map = {
-                    'critical': EventSeverity.critical,
-                    'high': EventSeverity.high,
-                    'medium': EventSeverity.medium
-                }
-                severity = severity_map.get(threat_level, EventSeverity.medium)
-                
-                # Save frame
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                frame_filename = f"vlm_scan_{camera_id}_{timestamp}_{uuid.uuid4().hex[:8]}.jpg"
-                frame_path = Path(settings.STORAGE_PATH) / "events" / frame_filename
-                frame_path.parent.mkdir(parents=True, exist_ok=True)
-                cv2.imwrite(str(frame_path), frame)
-                
-                # Create VLM-detected event
-                async with AsyncSessionLocal() as db:
-                    event = Event(
-                        camera_id=camera_id,
-                        event_type=event_type,
-                        severity=severity,
-                        summary=description or f"VLM detected {threat_type} threat",
-                        frame_path=str(frame_path),
-                        detection_metadata={
-                            "source": "vlm_safety_scan",
-                            "vlm_threat_type": threat_type,
-                            "vlm_threat_level": threat_level,
-                            "vlm_confidence": confidence,
-                            "vlm_description": description,
-                            "vlm_doubt": doubt,
-                            "verified": True,
-                            "time_context": time_context,
-                            "scan_time": datetime.now().isoformat()
-                        },
-                        summary_generated_at=datetime.now()
-                    )
-                    db.add(event)
-                    await db.commit()
-                    await db.refresh(event)
-                    
-                    logger.warning(f"🔥 VLM Safety Event created: ID={event.id}, Type={threat_type}, Level={threat_level}, Confidence={confidence}%")
-                    
-                    # Send immediate notification for VLM-detected threats
-                    await send_event_notification(event, user_id)
-            else:
-                logger.debug(f"VLM Safety Scan camera {camera_id}: Scene is safe")
-                
+            # Send notification
+            await send_event_notification(
+                event_id=event_id,
+                camera_name=camera_name,
+                summary=summary,
+                severity=severity.value,
+                user_id=user_id
+            )
         except Exception as e:
-            logger.error(f"VLM Safety Scan error for camera {camera_id}: {e}")
+            logger.error(f"Failed to send notification for event {event_id}: {e}")
+    
+    def stop_all(self):
+        """Stop all detection tasks"""
+        pass
 
 
-# Global singleton instance for synchronous access
+# Global singleton instance
 detection_service = DetectionService()
 
-# Alternative async getter (for backwards compatibility)
+# Alternative async getter
 _detection_service: Optional[DetectionService] = None
 
 

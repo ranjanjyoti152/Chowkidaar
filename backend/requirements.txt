@@ -15,24 +15,27 @@ python-jose[cryptography]>=3.3.0
 passlib[bcrypt]>=1.7.4
 bcrypt>=4.1.2
 
-# AI & Computer Vision
-ultralytics>=8.1.0
+# AI & Computer Vision - V-JEPA 2
 opencv-python-headless>=4.9.0.80
 numpy>=1.26.3
 pillow>=10.2.0
+torch>=2.0.0
 transformers>=4.36.0
 accelerate>=0.26.0
 huggingface_hub>=0.20.0
 tqdm>=4.66.0
+timm>=0.9.0
+einops>=0.7.0
+decord>=0.6.0
 
 # Vector Embeddings (Semantic Search)
 sentence-transformers>=2.2.0
 faiss-cpu>=1.7.4  # For GPU: conda install -c pytorch faiss-gpu
-imagehash>=4.3.0  # Perceptual hashing for VLM response caching
+imagehash>=4.3.0  # Perceptual hashing for caching
 pgvector>=0.2.0   # PostgreSQL vector extension for persistent embedding storage
 scikit-learn>=1.3.0  # Isolation Forest for anomaly detection
 
-# Ollama Integration
+# HTTP Client
 httpx>=0.26.0
 aiohttp>=3.9.3
 
@@ -57,4 +60,3 @@ pytest-asyncio>=0.23.3
 
 # Logging
 loguru>=0.7.2
-aiohttp>=3.9.0

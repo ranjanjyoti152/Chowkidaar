@@ -1,6 +1,6 @@
 """
 Chowkidaar NVR - Main Application
-AI-Powered Network Video Recorder System
+AI-Powered Network Video Recorder System with V-JEPA 2
 """
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
@@ -14,11 +14,9 @@ from pathlib import Path
 from app.core.config import settings
 from app.core.database import init_db, close_db, AsyncSessionLocal
 from app.api import api_router
-from app.services.yolo_detector import get_detector
+from app.services.vjepa2_service import get_vjepa2_service, VJEPA2Service
 from app.services.stream_handler import get_stream_manager
-from app.services.vlm_service import get_unified_vlm_service
 from app.services.detection_service import get_detection_service
-from app.services.owlv2_detector import OWLv2Detector
 from app.services.embedding_service import get_embedding_service, initialize_embeddings_from_db
 from sqlalchemy import select
 
@@ -51,81 +49,31 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing database...")
     await init_db()
     
-    # Initialize YOLO detector
-    logger.info("Loading YOLO model...")
+    # Initialize V-JEPA 2 detector
+    logger.info("Loading V-JEPA 2 model...")
     try:
-        detector = await get_detector()
-        if detector._initialized:
-            logger.info("✅ YOLO detector initialized")
-        else:
-            logger.warning("⚠️ YOLO detector failed to initialize")
-    except Exception as e:
-        logger.error(f"❌ YOLO detector error: {e}")
-    
-    # Pre-download OWLv2 models (if not cached)
-    logger.info("Checking OWLv2 models...")
-    try:
-        # Pre-download base model (most commonly used)
-        await OWLv2Detector.preload_model("owlv2-base")
-        logger.info("✅ OWLv2 models ready")
-    except Exception as e:
-        logger.warning(f"⚠️ OWLv2 preload skipped: {e}")
-    
-    # Check VLM service connection
-    logger.info("Checking VLM service connection...")
-    try:
-        unified_vlm_service = get_unified_vlm_service()
-        if await unified_vlm_service.check_health():
-            models = await unified_vlm_service.list_models()
-            logger.info(f"✅ VLM service connected. Available models: {models}")
-        else:
-            logger.warning("⚠️ VLM service not available")
-    except Exception as e:
-        logger.error(f"❌ VLM service error: {e}")
-    
-    # Load VLM settings from database and configure unified VLM service
-    logger.info("Loading VLM settings from database...")
-    try:
-        from app.models.settings import UserSettings
-        from app.models.user import User
-        async with AsyncSessionLocal() as db:
-            # First try to get admin user's settings (most authoritative)
-            admin_result = await db.execute(
-                select(UserSettings)
-                .join(User, UserSettings.user_id == User.id)
-                .where(User.role == 'admin')
-                .order_by(UserSettings.updated_at.desc())
-                .limit(1)
-            )
-            user_settings = admin_result.scalar_one_or_none()
-            
-            # Fall back to any user settings if no admin settings exist
-            if not user_settings:
+        vjepa2_service = await get_vjepa2_service()
+        
+        # Get model name from settings or use default
+        model_name = "vjepa2-large"  # Default model
+        try:
+            from app.models.settings import UserSettings
+            async with AsyncSessionLocal() as db:
                 result = await db.execute(
-                    select(UserSettings)
-                    .order_by(UserSettings.updated_at.desc())
-                    .limit(1)
+                    select(UserSettings).limit(1)
                 )
                 user_settings = result.scalar_one_or_none()
-            
-            if user_settings:
-                provider = getattr(user_settings, 'vlm_provider', 'ollama')
-                logger.info(f"Found saved VLM settings: provider={provider}, model={user_settings.vlm_model}, url={user_settings.vlm_url}")
-                unified_vlm_service.configure(
-                    provider=provider,
-                    ollama_url=user_settings.vlm_url,
-                    ollama_model=user_settings.vlm_model,
-                    openai_api_key=getattr(user_settings, 'openai_api_key', None),
-                    openai_model=getattr(user_settings, 'openai_model', 'gpt-4o'),
-                    openai_base_url=getattr(user_settings, 'openai_base_url', None),
-                    gemini_api_key=getattr(user_settings, 'gemini_api_key', None),
-                    gemini_model=getattr(user_settings, 'gemini_model', 'gemini-2.0-flash-exp')
-                )
-                logger.info(f"✅ VLM service configured from saved settings: provider={provider}")
-            else:
-                logger.warning("⚠️ No VLM settings found in database, using defaults (Ollama)")
+                if user_settings and hasattr(user_settings, 'vjepa2_model'):
+                    model_name = user_settings.vjepa2_model or "vjepa2-large"
+        except Exception as e:
+            logger.warning(f"Using default V-JEPA 2 model: {e}")
+        
+        if await vjepa2_service.initialize(model_name=model_name):
+            logger.info(f"✅ V-JEPA 2 initialized: {model_name}")
+        else:
+            logger.warning("⚠️ V-JEPA 2 failed to initialize")
     except Exception as e:
-        logger.error(f"❌ Error loading VLM settings: {e}")
+        logger.error(f"❌ V-JEPA 2 error: {e}")
     
     # Start all enabled camera streams automatically
     logger.info("Starting enabled camera streams...")
@@ -197,12 +145,16 @@ async def lifespan(app: FastAPI):
     stream_manager = get_stream_manager()
     await stream_manager.stop_all()
     
+    # Shutdown V-JEPA 2 service
+    try:
+        vjepa2_service = await get_vjepa2_service()
+        await vjepa2_service.shutdown()
+        logger.info("V-JEPA 2 service stopped")
+    except Exception as e:
+        logger.error(f"Error stopping V-JEPA 2 service: {e}")
+    
     # Close database
     await close_db()
-    
-    # Close VLM service
-    vlm_service = get_unified_vlm_service()
-    await vlm_service.close()
     
     logger.info("👋 Goodbye!")
 
@@ -210,7 +162,7 @@ async def lifespan(app: FastAPI):
 # Create FastAPI app
 app = FastAPI(
     title=settings.app_name,
-    description="AI-Powered Network Video Recorder with YOLOv8+ Detection and VLM Summarization",
+    description="AI-Powered Network Video Recorder with V-JEPA 2 Video Understanding",
     version=settings.app_version,
     lifespan=lifespan,
     docs_url="/api/docs",
@@ -263,7 +215,7 @@ async def root():
     return {
         "name": settings.app_name,
         "version": settings.app_version,
-        "description": "AI-Powered Network Video Recorder",
+        "description": "AI-Powered Network Video Recorder with V-JEPA 2",
         "docs": "/api/docs",
         "health": "/health"
     }

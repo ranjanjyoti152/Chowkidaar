@@ -11,9 +11,8 @@ from loguru import logger
 import uuid
 
 from app.core.config import settings
-from app.services.yolo_detector import YOLODetector, get_detector
+from app.services.vjepa2_service import VJEPA2Service, get_vjepa2_service
 from app.services.stream_handler import StreamManager, get_stream_manager
-from app.services.vlm_service import vlm_service as unified_vlm_service
 from app.models.event import EventType, EventSeverity
 
 
@@ -21,7 +20,7 @@ class EventProcessor:
     """Processes detected events and manages event lifecycle"""
     
     def __init__(self):
-        self._detector: Optional[YOLODetector] = None
+        self._vjepa2_service: Optional[VJEPA2Service] = None
         self._stream_manager: Optional[StreamManager] = None
         self._running = False
         self._event_callbacks: List = []
@@ -36,9 +35,9 @@ class EventProcessor:
     
     async def initialize(self):
         """Initialize all required services"""
-        self._detector = await get_detector()
+        self._vjepa2_service = await get_vjepa2_service()
         self._stream_manager = get_stream_manager()
-        logger.info("Event processor initialized (using unified VLM service)")
+        logger.info("Event processor initialized (using V-JEPA 2)")
     
     def add_event_callback(self, callback):
         """Add callback for new events"""
@@ -56,46 +55,33 @@ class EventProcessor:
         
         Returns event data if an event was detected, None otherwise
         """
-        if self._detector is None:
+        if self._vjepa2_service is None:
             return None
         
-        # Run detection
-        detection_result = await self._detector.detect(frame)
+        # Process frame with V-JEPA 2 (handles buffering internally)
+        result = await self._vjepa2_service.process_frame(camera_id, frame)
         
-        if not detection_result["objects"]:
+        if result is None or not result.get("detections"):
             return None
         
-        # Filter for relevant detections
-        filtered = self._detector.filter_detections(detection_result["objects"])
-        
-        if not filtered:
-            return None
+        detections = result["detections"]
         
         # Check cooldown
-        if not self._should_create_event(camera_id, filtered):
+        if not self._should_create_event(camera_id, detections):
             return None
         
-        # Determine primary event type (highest severity detection)
-        primary_detection = self._get_primary_detection(filtered)
-        event_type = self._detector.get_event_type(primary_detection["class_name"])
-        severity = self._get_event_severity(filtered)
+        # Get primary detection
+        primary_detection = detections[0]  # V-JEPA 2 returns one activity at a time
+        event_type = primary_detection.get("event_type") or EventType.motion_detected
+        severity = primary_detection.get("severity", EventSeverity.low)
         
         # Save frame
         frame_path = await self._save_frame(frame, camera_id)
         thumbnail_path = await self._save_thumbnail(frame, camera_id)
         
-        # Generate VLM summary using unified service (async)
-        summary = None
-        try:
-            summary = await unified_vlm_service.generate_event_summary(
-                frame=frame,
-                event_type=event_type.value,
-                detected_objects=filtered,
-                camera_name=camera_name,
-                timestamp=datetime.now()
-            )
-        except Exception as e:
-            logger.error(f"VLM summary error: {e}")
+        # Generate summary from activity
+        activity = primary_detection.get("class", "activity")
+        summary = f"Detected {activity} on {camera_name}"
         
         # Create event data
         event_data = {
@@ -104,20 +90,23 @@ class EventProcessor:
             "event_type": event_type,
             "severity": severity,
             "detected_objects": {
-                "objects": filtered,
-                "count": len(filtered)
+                "objects": detections,
+                "count": len(detections)
             },
-            "confidence_score": primary_detection["confidence"],
-            "detection_metadata": detection_result["metadata"],
+            "confidence_score": primary_detection.get("confidence", 0.5),
+            "detection_metadata": {
+                "model": "vjepa2",
+                "activity": activity
+            },
             "frame_path": str(frame_path) if frame_path else None,
             "thumbnail_path": str(thumbnail_path) if thumbnail_path else None,
             "summary": summary,
-            "summary_generated_at": datetime.now() if summary else None,
+            "summary_generated_at": datetime.now(),
             "timestamp": datetime.now()
         }
         
         # Update cooldown
-        self._update_cooldown(camera_id, filtered)
+        self._update_cooldown(camera_id, detections)
         
         # Notify callbacks
         for callback in self._event_callbacks:
@@ -141,7 +130,7 @@ class EventProcessor:
         camera_events = self._last_events[camera_id]
         
         for det in detections:
-            class_name = det["class_name"]
+            class_name = det.get("class", "unknown")
             if class_name not in camera_events:
                 return True
             
@@ -162,41 +151,7 @@ class EventProcessor:
         
         now = datetime.now()
         for det in detections:
-            self._last_events[camera_id][det["class_name"]] = now
-    
-    def _get_primary_detection(self, detections: List[Dict]) -> Dict:
-        """Get the most significant detection"""
-        # Priority: fire > smoke > person > vehicle > other
-        priority = ["fire", "smoke", "person", "car", "truck"]
-        
-        for p in priority:
-            for det in detections:
-                if det["class_name"].lower() == p:
-                    return det
-        
-        # Return highest confidence if no priority match
-        return max(detections, key=lambda x: x["confidence"])
-    
-    def _get_event_severity(self, detections: List[Dict]) -> EventSeverity:
-        """Determine overall event severity"""
-        severities = [
-            self._detector.get_severity(d["class_name"])
-            for d in detections
-        ]
-        
-        # Return highest severity
-        severity_order = [
-            EventSeverity.critical,
-            EventSeverity.high,
-            EventSeverity.medium,
-            EventSeverity.low
-        ]
-        
-        for sev in severity_order:
-            if sev in severities:
-                return sev
-        
-        return EventSeverity.low
+            self._last_events[camera_id][det.get("class", "unknown")] = now
     
     async def _save_frame(
         self,
@@ -247,31 +202,6 @@ class EventProcessor:
         except Exception as e:
             logger.error(f"Failed to save thumbnail: {e}")
             return None
-    
-    async def regenerate_summary(
-        self,
-        frame_path: str,
-        event_type: str,
-        detected_objects: List[Dict],
-        camera_name: str,
-        timestamp: datetime
-    ) -> Optional[str]:
-        """Regenerate VLM summary for an existing event"""
-        try:
-            frame = cv2.imread(frame_path)
-            if frame is None:
-                return None
-            
-            return await unified_vlm_service.generate_event_summary(
-                frame=frame,
-                event_type=event_type,
-                detected_objects=detected_objects,
-                camera_name=camera_name,
-                timestamp=timestamp
-            )
-        except Exception as e:
-            logger.error(f"Summary regeneration error: {e}")
-            return None
 
 
 # Global event processor instance
@@ -280,6 +210,6 @@ event_processor = EventProcessor()
 
 async def get_event_processor() -> EventProcessor:
     """Get the event processor instance"""
-    if event_processor._detector is None:
+    if event_processor._vjepa2_service is None:
         await event_processor.initialize()
     return event_processor
