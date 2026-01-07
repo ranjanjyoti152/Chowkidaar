@@ -123,7 +123,12 @@ class VJEPA2Service:
         self.model = None
         self.processor = None
         self.classifier = None
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        
+        # Multi-GPU support
+        self.gpu_count = torch.cuda.device_count() if torch.cuda.is_available() else 0
+        self.device = "cuda" if self.gpu_count > 0 else "cpu"
+        self.use_multi_gpu = self.gpu_count > 1
+        
         self.model_name = "vjepa2-large"
         self.model_id = self.AVAILABLE_MODELS["vjepa2-large"]
         self.initialized = False
@@ -133,6 +138,16 @@ class VJEPA2Service:
         self._inference_count = 0
         self._total_inference_time = 0.0
         self._last_inference_time = 0.0
+        
+        # Log GPU info
+        if self.gpu_count > 0:
+            logger.info(f"🖥️ Found {self.gpu_count} GPU(s) available")
+            for i in range(self.gpu_count):
+                gpu_name = torch.cuda.get_device_name(i)
+                gpu_mem = torch.cuda.get_device_properties(i).total_memory / 1e9
+                logger.info(f"  GPU {i}: {gpu_name} ({gpu_mem:.1f} GB)")
+        else:
+            logger.warning("⚠️ No GPUs available, using CPU")
         
     async def initialize(self, model_name: str = "vjepa2-large", device: str = None) -> bool:
         """
@@ -157,7 +172,15 @@ class VJEPA2Service:
             def load_model():
                 processor = AutoVideoProcessor.from_pretrained(self.model_id)
                 model = AutoModel.from_pretrained(self.model_id)
-                model = model.to(self.device)
+                
+                # Multi-GPU support with DataParallel
+                if self.use_multi_gpu:
+                    logger.info(f"🚀 Using DataParallel across {self.gpu_count} GPUs")
+                    model = torch.nn.DataParallel(model)
+                    model = model.to(self.device)
+                else:
+                    model = model.to(self.device)
+                    
                 model.eval()
                 return processor, model
             
@@ -169,7 +192,8 @@ class VJEPA2Service:
             await self._init_classifier()
             
             self.initialized = True
-            logger.info(f"✅ V-JEPA 2 initialized successfully on {self.device}")
+            gpu_info = f"{self.gpu_count} GPUs" if self.use_multi_gpu else self.device
+            logger.info(f"✅ V-JEPA 2 initialized successfully on {gpu_info}")
             return True
             
         except Exception as e:
@@ -359,6 +383,8 @@ class VJEPA2Service:
             "model": self.model_name,
             "model_id": self.model_id,
             "device": self.device,
+            "gpu_count": self.gpu_count,
+            "multi_gpu": self.use_multi_gpu,
             "initialized": self.initialized,
             "inference_count": self._inference_count,
             "average_inference_time_ms": round(avg_time, 2),
