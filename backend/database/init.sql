@@ -1,5 +1,6 @@
 -- Chowkidaar NVR - Database Initialization Script
 -- This script creates all required tables and indexes
+-- Updated for V-JEPA 2 video understanding
 
 -- Enable extensions
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -26,26 +27,37 @@ EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;
 
--- Event type enum (includes LLM-classified intelligent types)
+-- Event type enum (V-JEPA 2 activity recognition)
 DO $$ BEGIN
     CREATE TYPE event_type AS ENUM (
-        -- Basic detections (YOLO)
+        -- Basic detections
         'person_detected', 'vehicle_detected', 'animal_detected', 'motion_detected',
-        'object_detected',    -- General objects (furniture, electronics, etc.)
+        'object_detected',    -- General objects
         
-        -- Intelligent classifications (LLM decides)
-        'delivery',           -- Delivery person, courier, postman, food delivery
-        'visitor',            -- Guest, friend, family member visiting
-        'package_left',       -- Package/parcel left at door
-        'suspicious',         -- Suspicious behavior, lurking, unknown person
+        -- Activity classifications (V-JEPA 2)
+        'person_walking',     -- Person walking detected
+        'person_running',     -- Person running detected
+        'person_standing',    -- Person standing/stationary
+        'person_entering',    -- Person entering area
+        'person_leaving',     -- Person leaving area
+        'vehicle_moving',     -- Vehicle in motion
+        'vehicle_parked',     -- Parked vehicle
+        'suspicious_activity', -- Suspicious behavior detected
+        'normal_activity',    -- Normal/routine activity
+        
+        -- Legacy intelligent classifications
+        'delivery',           -- Delivery person, courier
+        'visitor',            -- Guest, visitor
+        'package_left',       -- Package left at door
+        'suspicious',         -- Suspicious behavior
         'intrusion',          -- Unauthorized entry attempt
-        'loitering',          -- Person staying too long without purpose
-        'theft_attempt',      -- Stealing, taking items
+        'loitering',          -- Person staying too long
+        'theft_attempt',      -- Stealing attempt
         
         -- Emergency / Safety
         'fire_detected', 'smoke_detected',
         'fall_detected',      -- Person fallen/collapsed
-        'accident',           -- Collision, crash, injury
+        'accident',           -- Collision, crash
         'medical_emergency',  -- Person needs medical help
         
         -- Other
@@ -120,7 +132,7 @@ CREATE TABLE IF NOT EXISTS user_permissions (
     
     -- Settings Permissions
     can_modify_detection_settings BOOLEAN DEFAULT false,
-    can_modify_vlm_settings BOOLEAN DEFAULT false,
+    can_modify_vjepa2_settings BOOLEAN DEFAULT false,   -- V-JEPA 2 settings
     can_modify_notification_settings BOOLEAN DEFAULT false,
     can_modify_system_settings BOOLEAN DEFAULT false,
     
@@ -164,15 +176,15 @@ CREATE TABLE IF NOT EXISTS cameras (
     detection_enabled BOOLEAN DEFAULT true,
     recording_enabled BOOLEAN DEFAULT false,
     fps INTEGER DEFAULT 15,
-    resolution_width INTEGER DEFAULT 640,   -- Default to common RTSP resolution
-    resolution_height INTEGER DEFAULT 480,  -- Used for heatmap normalization
+    resolution_width INTEGER DEFAULT 640,
+    resolution_height INTEGER DEFAULT 480,
     location VARCHAR(255),
     
     -- Context-aware detection settings (helps AI decide severity)
-    location_type VARCHAR(100),              -- office, kitchen, warehouse, entrance, parking, etc.
-    expected_activity TEXT,                   -- "people working on computers", "cooking with fire"
-    unexpected_activity TEXT,                 -- "running", "fighting", "strangers at night"
-    normal_conditions TEXT,                   -- "5-10 people during work hours", "fire on stove is normal"
+    location_type VARCHAR(100),
+    expected_activity TEXT,
+    unexpected_activity TEXT,
+    normal_conditions TEXT,
     
     owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     created_at TIMESTAMP DEFAULT NOW() NOT NULL,
@@ -198,8 +210,8 @@ CREATE TABLE IF NOT EXISTS events (
     summary_generated_at TIMESTAMP,
     
     -- Vector Embeddings (pgvector) for semantic search
-    text_embedding vector(384),     -- all-MiniLM-L6-v2 text embedding
-    image_embedding vector(512),    -- CLIP ViT-B/32 image embedding
+    text_embedding vector(384),
+    image_embedding vector(512),
     
     timestamp TIMESTAMP DEFAULT NOW() NOT NULL,
     duration_seconds FLOAT,
@@ -220,11 +232,9 @@ CREATE INDEX IF NOT EXISTS idx_events_severity ON events(severity);
 CREATE INDEX IF NOT EXISTS idx_events_acknowledged ON events(is_acknowledged);
 
 -- GIN index for efficient JSONB queries on detected_objects
--- Used by heatmap API to query by class name
 CREATE INDEX IF NOT EXISTS idx_events_detected_objects ON events USING GIN (detected_objects);
 
 -- HNSW indexes for fast vector similarity search (pgvector)
--- Used for semantic event search and visual similarity matching
 CREATE INDEX IF NOT EXISTS idx_events_text_embedding 
     ON events USING hnsw (text_embedding vector_cosine_ops)
     WITH (m = 16, ef_construction = 64);
@@ -232,9 +242,6 @@ CREATE INDEX IF NOT EXISTS idx_events_text_embedding
 CREATE INDEX IF NOT EXISTS idx_events_image_embedding 
     ON events USING hnsw (image_embedding vector_cosine_ops)
     WITH (m = 16, ef_construction = 64);
-
--- Note: detected_objects JSONB stores tracking data like:
--- [{"class": "person", "class_name": "person", "confidence": 0.85, "bbox": [...], "track_id": 1}, ...]
 
 -- ===========================================
 -- CHAT SESSIONS TABLE
@@ -266,42 +273,22 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id);
 
 -- ===========================================
--- USER SETTINGS TABLE
+-- USER SETTINGS TABLE (V-JEPA 2)
 -- ===========================================
 CREATE TABLE IF NOT EXISTS user_settings (
     id SERIAL PRIMARY KEY,
     user_id INTEGER UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     
-    -- Detection settings
-    detection_model VARCHAR(100) DEFAULT 'yolov8n',
-    detection_confidence FLOAT DEFAULT 0.5,
+    -- V-JEPA 2 Detection settings
+    vjepa2_model VARCHAR(100) DEFAULT 'vjepa2-large',
+    vjepa2_buffer_size INTEGER DEFAULT 64,       -- Frames in video buffer
+    vjepa2_sample_rate INTEGER DEFAULT 4,        -- Sample every Nth frame
     detection_device VARCHAR(50) DEFAULT 'cuda',
-    enabled_classes JSONB DEFAULT '["person", "car", "truck", "dog", "cat"]',
+    detection_confidence FLOAT DEFAULT 0.5,
     
-    -- OWLv2 custom queries for open-vocabulary detection
-    owlv2_queries JSONB DEFAULT '["a person", "a car", "a fire", "a lighter", "a dog", "a cat", "a weapon", "a knife", "a suspicious object"]',
-    
-    -- VLM Provider settings
-    vlm_provider VARCHAR(50) DEFAULT 'ollama',        -- 'ollama', 'openai', 'gemini'
-    
-    -- Ollama settings
-    vlm_model VARCHAR(100) DEFAULT 'gemma3:4b',
-    vlm_url VARCHAR(255) DEFAULT 'http://localhost:11434',
-    
-    -- OpenAI settings
-    openai_api_key VARCHAR(255),
-    openai_model VARCHAR(100) DEFAULT 'gpt-4o',
-    openai_base_url VARCHAR(255),                     -- For OpenAI-compatible APIs
-    
-    -- Gemini settings
-    gemini_api_key VARCHAR(255),
-    gemini_model VARCHAR(100) DEFAULT 'gemini-2.0-flash-exp',
-    
-    -- Common VLM settings
-    auto_summarize BOOLEAN DEFAULT true,
-    summarize_delay INTEGER DEFAULT 5,
-    vlm_safety_scan_enabled BOOLEAN DEFAULT true,
-    vlm_safety_scan_interval INTEGER DEFAULT 30,
+    -- Legacy fields (for migration compatibility)
+    detection_model VARCHAR(100) DEFAULT 'vjepa2-large',
+    enabled_classes JSONB DEFAULT '[]',
     
     -- Storage settings
     recordings_path VARCHAR(500) DEFAULT '/data/recordings',
@@ -385,12 +372,6 @@ CREATE TRIGGER update_user_permissions_updated_at
     EXECUTE FUNCTION update_updated_at_column();
 
 -- ===========================================
--- GRANT PERMISSIONS (for external connections)
--- ===========================================
--- GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO chowkidaar;
--- GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO chowkidaar;
-
--- ===========================================
 -- COMPLETED
 -- ===========================================
-SELECT 'Chowkidaar NVR database initialized successfully!' as status;
+SELECT 'Chowkidaar NVR database initialized with V-JEPA 2 support!' as status;
