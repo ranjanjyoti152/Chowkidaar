@@ -51,6 +51,9 @@ const eventTypeLabels: Record<EventType, string> = {
   vehicle_detected: 'Vehicle Detected',
   fire_detected: '🔥 Fire Detected',
   smoke_detected: '💨 Smoke Detected',
+  fall_detected: '🤕 Fall Detected',
+  accident: '💥 Accident',
+  medical_emergency: '🚑 Medical Emergency',
   animal_detected: 'Animal Detected',
   motion_detected: 'Motion Detected',
   intrusion: '🚨 Intrusion',
@@ -134,7 +137,7 @@ export default function Events() {
       setSearchResults(null)
       return
     }
-    
+
     setIsSearching(true)
     try {
       const results = await eventApi.searchEvents(searchQuery)
@@ -239,7 +242,7 @@ export default function Events() {
           <FunnelIcon className="w-5 h-5 text-gray-300" />
           <span className="text-sm text-gray-300">Filters:</span>
         </div>
-        
+
         {/* Sort Order */}
         <div className="flex items-center gap-2">
           <ArrowsUpDownIcon className="w-4 h-4 text-gray-400" />
@@ -252,7 +255,7 @@ export default function Events() {
             <option value="oldest">Oldest First</option>
           </select>
         </div>
-        
+
         <select
           value={filters.severity}
           onChange={(e) => setFilters({ ...filters, severity: e.target.value })}
@@ -304,13 +307,12 @@ export default function Events() {
         ) : displayEvents && displayEvents.length > 0 ? (
           <div className="divide-y divide-white/10">
             {displayEvents.map((event) => (
-                <motion.div
+              <motion.div
                 key={event.id}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                className={`p-4 hover:bg-white/10 cursor-pointer transition-colors ${
-                  !event.is_acknowledged ? 'border-l-2 border-primary-400' : ''
-                }`}
+                className={`p-4 hover:bg-white/10 cursor-pointer transition-colors ${!event.is_acknowledged ? 'border-l-2 border-primary-400' : ''
+                  }`}
                 onClick={() => setSelectedEvent(event)}
               >
                 <div className="flex items-center gap-4">
@@ -338,7 +340,7 @@ export default function Events() {
                       <h3 className="text-white font-medium">
                         {eventTypeLabels[event.event_type] || event.event_type}
                       </h3>
-                      <span 
+                      <span
                         className={`badge border ${severityColors[event.severity]} cursor-help`}
                         title={severityExplanations[event.severity]}
                       >

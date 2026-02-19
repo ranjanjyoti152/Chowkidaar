@@ -33,7 +33,7 @@ const itemVariants = {
   visible: {
     opacity: 1,
     y: 0,
-    transition: { duration: 0.3, ease: 'easeOut' }
+    transition: { duration: 0.3, ease: 'easeOut' as const }
   }
 }
 
@@ -128,7 +128,7 @@ export default function Dashboard() {
         animate="visible"
         className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"
       >
-        {statCards.map((stat, index) => (
+        {statCards.map((stat) => (
           <motion.div
             key={stat.name}
             variants={itemVariants}
