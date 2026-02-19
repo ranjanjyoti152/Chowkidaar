@@ -180,7 +180,7 @@ export default function Dashboard() {
               </div>
             ) : cameras && cameras.length > 0 ? (
               <div className="grid grid-cols-2 gap-4">
-                {cameras.slice(0, 4).map((camera, idx) => (
+                {cameras.map((camera, idx) => (
                   <motion.div
                     key={camera.id}
                     initial={{ opacity: 0, scale: 0.95 }}
