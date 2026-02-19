@@ -1,5 +1,5 @@
 """
-Chowkidaar NVR - AI Assistant Routes
+Chowkidar NVR - AI Assistant Routes
 """
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status

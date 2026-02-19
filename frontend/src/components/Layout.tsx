@@ -75,7 +75,7 @@ export default function Layout() {
               <VideoCameraIcon className="w-6 h-6 text-white" />
             </motion.div>
             <div>
-              <h1 className="text-xl font-bold text-gradient">Chowkidaar</h1>
+              <h1 className="text-xl font-bold text-gradient">Chowkidar</h1>
               <p className="text-xs text-gray-500">AI Security System</p>
             </div>
           </div>

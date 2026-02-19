@@ -1,5 +1,5 @@
 """
-Chowkidaar NVR - Event Schemas
+Chowkidar NVR - Event Schemas
 """
 from datetime import datetime
 from typing import Optional, List, Dict, Any

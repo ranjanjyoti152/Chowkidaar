@@ -1,5 +1,5 @@
 """
-Chowkidaar NVR - Services Module
+Chowkidar NVR - Services Module
 """
 from app.services.yolo_detector import YOLODetector, get_detector
 from app.services.stream_handler import (

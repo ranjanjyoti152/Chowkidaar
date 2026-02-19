@@ -1,3 +1,3 @@
 """
-Chowkidaar NVR - Application Package
+Chowkidar NVR - Application Package
 """

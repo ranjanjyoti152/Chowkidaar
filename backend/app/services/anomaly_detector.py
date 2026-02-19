@@ -1,5 +1,5 @@
 """
-Chowkidaar NVR - Anomaly Detector
+Chowkidar NVR - Anomaly Detector
 Unsupervised anomaly detection using Isolation Forest.
 """
 import asyncio

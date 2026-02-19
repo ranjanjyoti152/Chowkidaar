@@ -1,4 +1,4 @@
-# 🛡️ Chowkidaar - Intelligent NVR System
+# 🛡️ Chowkidar - Intelligent NVR System
 
 <div align="center">
 
@@ -13,13 +13,13 @@
 
 </div>
 
-**Chowkidaar** (meaning "Watchman" in Hindi) is an **advanced AI-powered Network Video Recorder** application that provides intelligent surveillance with real-time object detection, event summarization, and an AI assistant for querying events.
+**Chowkidar** (meaning "Watchman" in Hindi) is an **advanced AI-powered Network Video Recorder** application that provides intelligent surveillance with real-time object detection, event summarization, and an AI assistant for querying events.
 
 ## 🏗️ System Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                           CHOWKIDAAR NVR SYSTEM                              │
+│                           CHOWKIDAR NVR SYSTEM                              │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
 │  ┌──────────────┐     ┌──────────────────────────────────────────────────┐  │
@@ -86,7 +86,7 @@
 ## 📁 Project Structure
 
 ```
-chowkidaar/
+chowkidar/
 ├── backend/                    # FastAPI Backend
 │   ├── app/
 │   │   ├── api/               # API routes
@@ -144,7 +144,7 @@ chowkidaar/
 
 ## 🎮 GPU Acceleration (CUDA)
 
-Chowkidaar supports **GPU-accelerated video streaming** using NVIDIA CUDA for maximum performance with multiple camera streams.
+Chowkidar supports **GPU-accelerated video streaming** using NVIDIA CUDA for maximum performance with multiple camera streams.
 
 ### Features
 - 🚀 **CUDA Hardware Video Decoding** - NVCUVID for H.264/H.265 streams
@@ -159,7 +159,7 @@ Chowkidaar supports **GPU-accelerated video streaming** using NVIDIA CUDA for ma
 
 ### Building OpenCV with CUDA Support
 
-Chowkidaar includes a script to compile OpenCV from source with full CUDA support:
+Chowkidar includes a script to compile OpenCV from source with full CUDA support:
 
 ```bash
 # Navigate to scripts directory
@@ -223,7 +223,7 @@ cuDNN: YES (ver 9.0.0)
 
 ### CPU Fallback
 
-If CUDA is not available, Chowkidaar automatically falls back to CPU video decoding. You'll see in logs:
+If CUDA is not available, Chowkidar automatically falls back to CPU video decoding. You'll see in logs:
 - `[🚀 CUDA]` - Using GPU hardware decoding
 - `[💻 CPU]` - Using CPU software decoding
 
@@ -240,8 +240,8 @@ If CUDA is not available, Chowkidaar automatically falls back to CPU video decod
 
 ```bash
 # Clone the repository
-git clone https://github.com/ranjanjyoti152/Chowkidaar.git
-cd Chowkidaar
+git clone https://github.com/ranjanjyoti152/Chowkidar.git
+cd Chowkidar
 
 # Copy environment file and configure
 cp .env.example .env
@@ -262,16 +262,16 @@ docker compose up -d
 ```bash
 # Start PostgreSQL container
 docker run -d \
-  --name chowkidaar-db \
-  -e POSTGRES_USER=chowkidaar \
-  -e POSTGRES_PASSWORD=ChowkidaarSecure123 \
-  -e POSTGRES_DB=chowkidaar \
+  --name chowkidar-db \
+  -e POSTGRES_USER=chowkidar \
+  -e POSTGRES_PASSWORD=ChowkidarSecure123 \
+  -e POSTGRES_DB=chowkidar \
   -p 5533:5432 \
-  -v chowkidaar_postgres:/var/lib/postgresql/data \
+  -v chowkidar_postgres:/var/lib/postgresql/data \
   postgres:16-alpine
 
 # Initialize database schema
-docker exec -i chowkidaar-db psql -U chowkidaar -d chowkidaar < backend/database/init.sql
+docker exec -i chowkidar-db psql -U chowkidar -d chowkidar < backend/database/init.sql
 ```
 
 **Option B: Using System PostgreSQL**
@@ -281,13 +281,13 @@ sudo apt install postgresql postgresql-contrib
 
 # Create database and user
 sudo -u postgres psql << EOF
-CREATE USER chowkidaar WITH PASSWORD 'ChowkidaarSecure123';
-CREATE DATABASE chowkidaar OWNER chowkidaar;
-GRANT ALL PRIVILEGES ON DATABASE chowkidaar TO chowkidaar;
+CREATE USER chowkidar WITH PASSWORD 'ChowkidarSecure123';
+CREATE DATABASE chowkidar OWNER chowkidar;
+GRANT ALL PRIVILEGES ON DATABASE chowkidar TO chowkidar;
 EOF
 
 # Initialize schema
-PGPASSWORD=ChowkidaarSecure123 psql -h localhost -U chowkidaar -d chowkidaar < backend/database/init.sql
+PGPASSWORD=ChowkidarSecure123 psql -h localhost -U chowkidar -d chowkidar < backend/database/init.sql
 ```
 
 #### 2. Setup Ollama (Vision LLM)
@@ -320,13 +320,13 @@ pip install -r requirements.txt
 # Create .env file
 cat > .env << 'EOF'
 # Application
-APP_NAME=Chowkidaar
+APP_NAME=Chowkidar
 DEBUG=true
 SECRET_KEY=your-super-secret-key-change-in-production
 
 # Database (adjust port if using system PostgreSQL: 5432)
-DATABASE_URL=postgresql+asyncpg://chowkidaar:ChowkidaarSecure123@localhost:5533/chowkidaar
-DATABASE_SYNC_URL=postgresql+psycopg2://chowkidaar:ChowkidaarSecure123@localhost:5533/chowkidaar
+DATABASE_URL=postgresql+asyncpg://chowkidar:ChowkidarSecure123@localhost:5533/chowkidar
+DATABASE_SYNC_URL=postgresql+psycopg2://chowkidar:ChowkidarSecure123@localhost:5533/chowkidar
 
 # JWT
 JWT_SECRET_KEY=jwt-secret-key-change-in-production
@@ -443,7 +443,7 @@ cd ../frontend
 npm run dev &
 FRONTEND_PID=$!
 
-echo "✅ Chowkidaar Started!"
+echo "✅ Chowkidar Started!"
 echo "   Frontend: http://localhost:5173"
 echo "   Backend:  http://localhost:8001"
 echo ""
@@ -563,4 +563,4 @@ Contributions are welcome! Please read our contributing guidelines.
 
 ---
 
-**Chowkidaar** - Your AI-powered digital watchman 🛡️
+**Chowkidar** - Your AI-powered digital watchman 🛡️

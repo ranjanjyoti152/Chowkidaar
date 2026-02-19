@@ -1,5 +1,5 @@
 """
-Chowkidaar NVR - System Monitoring Routes
+Chowkidar NVR - System Monitoring Routes
 """
 from typing import List
 from pathlib import Path

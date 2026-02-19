@@ -1,5 +1,5 @@
 """
-Chowkidaar NVR - Schemas Module
+Chowkidar NVR - Schemas Module
 """
 from app.schemas.user import (
     UserBase, UserCreate, UserUpdate, UserPasswordUpdate, UserResponse, UserWithStats

@@ -1,5 +1,5 @@
 """
-Chowkidaar NVR - Camera Management Routes
+Chowkidar NVR - Camera Management Routes
 """
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query

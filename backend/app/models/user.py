@@ -1,5 +1,5 @@
 """
-Chowkidaar NVR - User Model
+Chowkidar NVR - User Model
 """
 from datetime import datetime
 from typing import Optional, List

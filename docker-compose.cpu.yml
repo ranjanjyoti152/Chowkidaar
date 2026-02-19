@@ -1,4 +1,4 @@
-# Chowkidaar NVR - Docker Compose (CPU-only, no GPU)
+# Chowkidar NVR - Docker Compose (CPU-only, no GPU)
 # Use this if you don't have an NVIDIA GPU
 version: '3.8'
 
@@ -6,18 +6,18 @@ services:
   # PostgreSQL Database with pgvector extension for semantic search
   postgres:
     image: pgvector/pgvector:pg16  # PostgreSQL 16 with pgvector pre-installed
-    container_name: chowkidaar-db
+    container_name: chowkidar-db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-chowkidaar}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-chowkidaar_secret}
-      POSTGRES_DB: ${POSTGRES_DB:-chowkidaar}
+      POSTGRES_USER: ${POSTGRES_USER:-chowkidar}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-chowkidar_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-chowkidar}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-chowkidaar} -d ${POSTGRES_DB:-chowkidaar}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-chowkidar} -d ${POSTGRES_DB:-chowkidar}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -25,7 +25,7 @@ services:
   # Redis (for caching and message queue)
   redis:
     image: redis:7-alpine
-    container_name: chowkidaar-redis
+    container_name: chowkidar-redis
     restart: unless-stopped
     command: redis-server --appendonly yes
     volumes:
@@ -41,7 +41,7 @@ services:
   # Ollama VLM Server (CPU mode)
   ollama:
     image: ollama/ollama:latest
-    container_name: chowkidaar-ollama
+    container_name: chowkidar-ollama
     restart: unless-stopped
     volumes:
       - ollama_data:/root/.ollama
@@ -55,7 +55,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: chowkidaar-backend
+    container_name: chowkidar-backend
     restart: unless-stopped
     depends_on:
       postgres:
@@ -63,7 +63,7 @@ services:
       redis:
         condition: service_healthy
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-chowkidaar}:${POSTGRES_PASSWORD:-chowkidaar_secret}@postgres:5432/${POSTGRES_DB:-chowkidaar}
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-chowkidar}:${POSTGRES_PASSWORD:-chowkidar_secret}@postgres:5432/${POSTGRES_DB:-chowkidar}
       - REDIS_URL=redis://redis:6379
       - SECRET_KEY=${SECRET_KEY:-change-this-in-production-please}
       - OLLAMA_BASE_URL=http://ollama:11434
@@ -84,7 +84,7 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    container_name: chowkidaar-frontend
+    container_name: chowkidar-frontend
     restart: unless-stopped
     depends_on:
       - backend
@@ -93,13 +93,13 @@ services:
 
 volumes:
   postgres_data:
-    name: chowkidaar_postgres
+    name: chowkidar_postgres
   redis_data:
-    name: chowkidaar_redis
+    name: chowkidar_redis
   ollama_data:
-    name: chowkidaar_ollama
+    name: chowkidar_ollama
 
 networks:
   default:
-    name: chowkidaar_network
+    name: chowkidar_network
     driver: bridge

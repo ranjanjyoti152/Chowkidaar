@@ -1,5 +1,5 @@
 """
-Chowkidaar NVR - Permission Model
+Chowkidar NVR - Permission Model
 Granular permissions for Role-Based Access Control
 """
 from datetime import datetime

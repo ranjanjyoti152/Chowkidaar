@@ -1,5 +1,5 @@
 """
-Chowkidaar NVR - Tiered VLM Processor
+Chowkidar NVR - Tiered VLM Processor
 Optimizes VLM usage based on event severity and detection patterns.
 
 Strategy:

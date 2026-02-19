@@ -1,5 +1,5 @@
 """
-Chowkidaar NVR - VLM Cache Service
+Chowkidar NVR - VLM Cache Service
 Perceptual hash-based caching for VLM responses to reduce inference costs.
 
 Uses perceptual hashing (pHash) to identify similar frames and reuse

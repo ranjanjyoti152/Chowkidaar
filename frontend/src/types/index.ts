@@ -1,4 +1,4 @@
-// API Types for Chowkidaar NVR
+// API Types for Chowkidar NVR
 
 // Auth Types
 export interface LoginRequest {

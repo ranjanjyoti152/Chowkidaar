@@ -1,5 +1,5 @@
 """
-Chowkidaar NVR - Event Embedding Service
+Chowkidar NVR - Event Embedding Service
 Vector embeddings for semantic search of surveillance events
 """
 import numpy as np

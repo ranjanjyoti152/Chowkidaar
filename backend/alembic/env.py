@@ -1,4 +1,4 @@
-"""Alembic environment configuration for Chowkidaar NVR"""
+"""Alembic environment configuration for Chowkidar NVR"""
 import asyncio
 from logging.config import fileConfig
 

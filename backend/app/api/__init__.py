@@ -1,5 +1,5 @@
 """
-Chowkidaar NVR - API Routes Module
+Chowkidar NVR - API Routes Module
 """
 from fastapi import APIRouter
 from app.api.routes import auth, users, cameras, events, assistant, system, settings, embeddings

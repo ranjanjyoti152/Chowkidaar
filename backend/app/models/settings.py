@@ -1,5 +1,5 @@
 """
-Chowkidaar NVR - User Settings Model
+Chowkidar NVR - User Settings Model
 """
 from datetime import datetime
 from typing import Optional

@@ -1,5 +1,5 @@
 """
-Chowkidaar NVR - API Dependencies
+Chowkidar NVR - API Dependencies
 """
 from typing import Optional, Generator, Callable
 from functools import wraps

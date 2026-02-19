@@ -1,5 +1,5 @@
 """
-Chowkidaar NVR - Chat Session Model for AI Assistant
+Chowkidar NVR - Chat Session Model for AI Assistant
 """
 from datetime import datetime
 from typing import Optional, List

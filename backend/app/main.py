@@ -1,5 +1,5 @@
 """
-Chowkidaar NVR - Main Application
+Chowkidar NVR - Main Application
 AI-Powered Network Video Recorder System
 """
 from contextlib import asynccontextmanager
@@ -31,7 +31,7 @@ logger.add(
     level="DEBUG" if settings.debug else "INFO"
 )
 logger.add(
-    "logs/chowkidaar.log",
+    "logs/chowkidar.log",
     rotation="10 MB",
     retention="7 days",
     level="DEBUG"

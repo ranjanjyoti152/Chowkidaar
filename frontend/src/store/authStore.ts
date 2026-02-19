@@ -43,7 +43,7 @@ export const useAuthStore = create<AuthState>()(
         }),
     }),
     {
-      name: 'chowkidaar-auth',
+      name: 'chowkidar-auth',
       partialize: (state) => ({
         user: state.user,
         token: state.token,

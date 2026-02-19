@@ -1,5 +1,5 @@
 """
-Chowkidaar NVR - Ollama VLM Integration Service
+Chowkidar NVR - Ollama VLM Integration Service
 """
 import asyncio
 import base64
@@ -210,7 +210,7 @@ Be specific and factual. Keep under 150 words."""
             messages = []
             
             # System message
-            system_prompt = """You are Chowkidaar AI, an intelligent security assistant for a surveillance system.
+            system_prompt = """You are Chowkidar AI, an intelligent security assistant for a surveillance system.
 You have access to event summaries and can help users understand security events.
 
 IMPORTANT RULES:

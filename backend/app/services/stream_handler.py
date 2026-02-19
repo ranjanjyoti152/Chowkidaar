@@ -1,5 +1,5 @@
 """
-Chowkidaar NVR - RTSP Stream Handler Service
+Chowkidar NVR - RTSP Stream Handler Service
 With CUDA hardware acceleration support
 """
 import asyncio

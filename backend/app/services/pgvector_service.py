@@ -1,5 +1,5 @@
 """
-Chowkidaar NVR - pgvector Embedding Service
+Chowkidar NVR - pgvector Embedding Service
 PostgreSQL-based vector storage and search replacing in-memory FAISS.
 """
 import asyncio

@@ -1,5 +1,5 @@
 """
-Chowkidaar NVR - Notification Service
+Chowkidar NVR - Notification Service
 Sends event notifications via Telegram and Email
 """
 import asyncio
@@ -218,7 +218,7 @@ class NotificationService:
             msg = MIMEMultipart('related')
             
             event_type_display = event.event_type.value.replace('_', ' ').title()
-            msg['Subject'] = f"🚨 Chowkidaar Alert: {event_type_display} - {event.severity.value.upper()}"
+            msg['Subject'] = f"🚨 Chowkidar Alert: {event_type_display} - {event.severity.value.upper()}"
             msg['From'] = settings.email_from_address
             msg['To'] = ', '.join(settings.email_recipients)
             
@@ -279,7 +279,7 @@ class NotificationService:
             html_parts.append("""
                     <div style="text-align: center; margin-top: 20px; padding-top: 15px; border-top: 1px solid #4b5563;">
                         <p style="color: #9ca3af; font-size: 12px;">
-                            🛡️ Chowkidaar NVR - AI-Powered Security System
+                            🛡️ Chowkidar NVR - AI-Powered Security System
                         </p>
                     </div>
                 </div>

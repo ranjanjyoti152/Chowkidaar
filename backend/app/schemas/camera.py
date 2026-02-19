@@ -1,5 +1,5 @@
 """
-Chowkidaar NVR - Camera Schemas
+Chowkidar NVR - Camera Schemas
 """
 from datetime import datetime
 from typing import Optional

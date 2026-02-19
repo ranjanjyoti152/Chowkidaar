@@ -1,5 +1,5 @@
 """
-Chowkidaar NVR - OWLv2 Open-Vocabulary Object Detection Service
+Chowkidar NVR - OWLv2 Open-Vocabulary Object Detection Service
 Google's OWL-ViT v2 for detecting objects using text queries
 """
 import asyncio

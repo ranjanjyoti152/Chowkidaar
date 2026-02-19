@@ -1,5 +1,5 @@
 """
-Chowkidaar NVR - Predictive Incident Service
+Chowkidar NVR - Predictive Incident Service
 Predict potential incidents BEFORE they happen using pattern analysis.
 """
 import asyncio

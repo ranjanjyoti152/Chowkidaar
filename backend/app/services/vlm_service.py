@@ -1,5 +1,5 @@
 """
-Chowkidaar NVR - Unified VLM Service
+Chowkidar NVR - Unified VLM Service
 Supports Ollama, OpenAI, and Google Gemini APIs
 """
 import asyncio
@@ -194,7 +194,7 @@ Do not add notes, disclaimers, recommendations, or suggestions."""
             return f"Error: {str(e)}"
     
     def _build_system_prompt(self, context: Optional[str], has_images: bool) -> str:
-        system_prompt = """You are Chowkidaar AI, an intelligent security assistant for a surveillance system.
+        system_prompt = """You are Chowkidar AI, an intelligent security assistant for a surveillance system.
 You have access to event summaries and can help users understand security events.
 
 IMPORTANT RULES:
@@ -450,7 +450,7 @@ Do not use markdown formatting, bullet points, or asterisks."""
         return "VLM Error: Request failed"
     
     def _build_system_prompt(self, context: Optional[str], has_images: bool) -> str:
-        system_prompt = """You are Chowkidaar AI, an intelligent security assistant for a surveillance system.
+        system_prompt = """You are Chowkidar AI, an intelligent security assistant for a surveillance system.
 You have access to event summaries and can help users understand security events.
 
 IMPORTANT RULES:
@@ -621,7 +621,7 @@ Do not use markdown formatting, bullet points, or asterisks."""
             })
             contents.append({
                 "role": "model", 
-                "parts": [{"text": "I understand. I am Chowkidaar AI, ready to help with security analysis."}]
+                "parts": [{"text": "I understand. I am Chowkidar AI, ready to help with security analysis."}]
             })
             
             # Add history
@@ -664,7 +664,7 @@ Do not use markdown formatting, bullet points, or asterisks."""
             return f"Error: {str(e)}"
     
     def _build_system_prompt(self, context: Optional[str], has_images: bool) -> str:
-        system_prompt = """You are Chowkidaar AI, an intelligent security assistant for a surveillance system.
+        system_prompt = """You are Chowkidar AI, an intelligent security assistant for a surveillance system.
 You have access to event summaries and can help users understand security events.
 
 IMPORTANT RULES:

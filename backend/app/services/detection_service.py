@@ -1,5 +1,5 @@
 """
-Chowkidaar NVR - Background Detection Service
+Chowkidar NVR - Background Detection Service
 Handles automatic event creation from detections
 """
 import asyncio

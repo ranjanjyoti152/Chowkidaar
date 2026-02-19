@@ -1,5 +1,5 @@
 """
-Chowkidaar NVR - Authentication Routes
+Chowkidar NVR - Authentication Routes
 """
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status

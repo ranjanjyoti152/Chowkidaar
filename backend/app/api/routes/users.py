@@ -1,5 +1,5 @@
 """
-Chowkidaar NVR - User Management Routes
+Chowkidar NVR - User Management Routes
 """
 from datetime import datetime
 from typing import List, Optional

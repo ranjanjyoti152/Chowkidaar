@@ -1,5 +1,5 @@
 """
-Chowkidaar NVR - Chat/Assistant Schemas
+Chowkidar NVR - Chat/Assistant Schemas
 """
 from datetime import datetime
 from typing import Optional, List, Dict, Any

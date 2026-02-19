@@ -99,7 +99,7 @@ export default function Login() {
             transition={{ delay: 0.3 }}
             className="text-3xl font-bold text-gradient"
           >
-            Chowkidaar
+            Chowkidar
           </motion.h1>
           <motion.p 
             initial={{ opacity: 0 }}

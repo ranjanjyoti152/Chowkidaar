@@ -1,5 +1,5 @@
 """
-Chowkidaar NVR - Configuration Module
+Chowkidar NVR - Configuration Module
 """
 from typing import List, Optional
 from pydantic_settings import BaseSettings
@@ -14,14 +14,14 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent.resolve()
 
 class Settings(BaseSettings):
     # Application
-    app_name: str = "Chowkidaar"
+    app_name: str = "Chowkidar"
     app_version: str = "1.0.0"
     debug: bool = False
     secret_key: str = "change-this-secret-key"
     
     # Database
-    database_url: str = "postgresql+asyncpg://postgres:password@localhost:5432/chowkidaar"
-    database_sync_url: str = "postgresql://postgres:password@localhost:5432/chowkidaar"
+    database_url: str = "postgresql+asyncpg://postgres:password@localhost:5432/chowkidar"
+    database_sync_url: str = "postgresql://postgres:password@localhost:5432/chowkidar"
     
     # JWT
     jwt_secret_key: str = "jwt-secret-key"

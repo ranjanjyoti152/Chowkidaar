@@ -330,7 +330,7 @@ print_usage() {
     echo "  # Or use CUDA-accelerated decoder"
     echo "  gpu_frame = cv2.cuda_GpuMat()"
     echo ""
-    echo "For Chowkidaar NVR, restart the backend to use GPU acceleration."
+    echo "For Chowkidar NVR, restart the backend to use GPU acceleration."
     echo ""
 }
 

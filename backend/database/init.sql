@@ -1,4 +1,4 @@
--- Chowkidaar NVR - Database Initialization Script
+-- Chowkidar NVR - Database Initialization Script
 -- This script creates all required tables and indexes
 
 -- Enable extensions
@@ -387,10 +387,10 @@ CREATE TRIGGER update_user_permissions_updated_at
 -- ===========================================
 -- GRANT PERMISSIONS (for external connections)
 -- ===========================================
--- GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO chowkidaar;
--- GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO chowkidaar;
+-- GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO chowkidar;
+-- GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO chowkidar;
 
 -- ===========================================
 -- COMPLETED
 -- ===========================================
-SELECT 'Chowkidaar NVR database initialized successfully!' as status;
+SELECT 'Chowkidar NVR database initialized successfully!' as status;

@@ -1,5 +1,5 @@
 """
-Chowkidaar NVR - Security Module
+Chowkidar NVR - Security Module
 """
 from datetime import datetime, timedelta
 from typing import Optional, Union

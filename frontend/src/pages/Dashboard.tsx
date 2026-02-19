@@ -117,7 +117,7 @@ export default function Dashboard() {
       >
         <div>
           <h1 className="page-title">Dashboard</h1>
-          <p className="text-gray-400 mt-1">Welcome to Chowkidaar NVR</p>
+          <p className="text-gray-400 mt-1">Welcome to Chowkidar NVR</p>
         </div>
       </motion.div>
 

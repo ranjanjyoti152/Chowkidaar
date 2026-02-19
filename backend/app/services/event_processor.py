@@ -1,5 +1,5 @@
 """
-Chowkidaar NVR - Event Processing Service
+Chowkidar NVR - Event Processing Service
 """
 import asyncio
 from typing import Dict, Any, List, Optional

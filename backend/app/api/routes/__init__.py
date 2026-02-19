@@ -1,3 +1,3 @@
 """
-Chowkidaar NVR - API Routes Init
+Chowkidar NVR - API Routes Init
 """

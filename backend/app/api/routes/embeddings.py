@@ -1,5 +1,5 @@
 """
-Chowkidaar NVR - Embeddings API Routes
+Chowkidar NVR - Embeddings API Routes
 Provides embedding visualization data for the Insights page
 """
 from typing import List, Optional

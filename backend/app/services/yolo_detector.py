@@ -1,5 +1,5 @@
 """
-Chowkidaar NVR - YOLO Object Detection Service
+Chowkidar NVR - YOLO Object Detection Service
 """
 import asyncio
 from typing import List, Dict, Any, Optional, Tuple

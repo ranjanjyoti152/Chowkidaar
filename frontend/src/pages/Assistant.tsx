@@ -386,7 +386,7 @@ export default function Assistant() {
               </div>
               <div>
                 <h1 className="text-base sm:text-lg font-semibold text-white flex items-center gap-2">
-                  <span className="hidden xs:inline">Chowkidaar</span> AI
+                  <span className="hidden xs:inline">Chowkidar</span> AI
                   <span className="hidden sm:inline px-2 py-0.5 rounded-full text-[10px] font-medium bg-primary-500/20 text-primary-300 border border-primary-500/30">
                     Online
                   </span>

@@ -1,5 +1,5 @@
 """
-Chowkidaar NVR - System Monitoring Service
+Chowkidar NVR - System Monitoring Service
 """
 import asyncio
 from typing import Dict, Any, List, Optional

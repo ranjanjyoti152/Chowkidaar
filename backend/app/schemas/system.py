@@ -1,5 +1,5 @@
 """
-Chowkidaar NVR - System Monitoring Schemas
+Chowkidar NVR - System Monitoring Schemas
 """
 from typing import Optional, List, Dict
 from pydantic import BaseModel

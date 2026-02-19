@@ -603,7 +603,7 @@ export default function Settings() {
           </div>
           <div>
             <h1 className="page-title">Settings</h1>
-            <p className="text-gray-300 mt-1">Configure Chowkidaar NVR</p>
+            <p className="text-gray-300 mt-1">Configure Chowkidar NVR</p>
           </div>
         </div>
         <button
@@ -2025,7 +2025,7 @@ export default function Settings() {
                                 },
                               })
                             }
-                            placeholder="chowkidaar@example.com"
+                            placeholder="chowkidar@example.com"
                             className="input"
                           />
                         </div>

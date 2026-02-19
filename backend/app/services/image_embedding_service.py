@@ -1,5 +1,5 @@
 """
-Chowkidaar NVR - Image Embedding Service
+Chowkidar NVR - Image Embedding Service
 CLIP-based image embedding for visual similarity search and cross-camera matching.
 """
 import asyncio
